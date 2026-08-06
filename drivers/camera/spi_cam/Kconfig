@@ -1,0 +1,22 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+config DOOR_LOCK_CAMERA_SPI
+	bool "SPI camera driver for gesture access"
+	select SPI
+	select VIDEO
+	help
+	  Zephyr `video` class driver for the SPI camera module used by the
+	  gesture access feature. Selected automatically by
+	  CONFIG_DOOR_LOCK_GESTURE_ACCESS; do not enable directly.
+
+if DOOR_LOCK_CAMERA_SPI
+
+module = DOOR_LOCK_CAMERA_SPI
+module-str = Door Lock SPI camera driver
+source "$(ZEPHYR_BASE)/subsys/logging/Kconfig.template.log_config"
+
+endif # DOOR_LOCK_CAMERA_SPI

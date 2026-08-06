@@ -19,6 +19,10 @@
 #include <aliro/aliro.h>
 #endif // CONFIG_DOOR_LOCK_BLE_UWB
 
+#ifdef CONFIG_DOOR_LOCK_GESTURE_ACCESS
+#include <gesture_access/gesture_access.h>
+#endif // CONFIG_DOOR_LOCK_GESTURE_ACCESS
+
 LOG_MODULE_REGISTER(app, CONFIG_CHIP_APP_LOG_LEVEL);
 
 int main()
@@ -57,6 +61,15 @@ int main()
 	}
 
 #endif // CONFIG_DOOR_LOCK_BLE_UWB
+
+#ifdef CONFIG_DOOR_LOCK_GESTURE_ACCESS
+
+	int gestureAccessErr = DoorLock::GestureAccess::Init();
+	VerifyOrDie(gestureAccessErr == 0, "Failed to initialize gesture access");
+	gestureAccessErr = DoorLock::GestureAccess::Start();
+	VerifyOrDie(gestureAccessErr == 0, "Failed to start gesture access");
+
+#endif // CONFIG_DOOR_LOCK_GESTURE_ACCESS
 
 	int err = StartMatter();
 	VerifyOrDie(err == EXIT_SUCCESS, "Failed to start Matter");

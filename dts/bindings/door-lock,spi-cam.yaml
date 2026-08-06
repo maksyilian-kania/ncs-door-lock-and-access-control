@@ -1,0 +1,12 @@
+# DOOR_LOCK_SPI_CAM
+
+# Copyright (c) 2026 Nordic Semiconductor ASA
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+
+description: |
+  SPI camera module used by the gesture access feature.
+
+
+compatible: "door-lock,spi-cam"
+
+include: spi-device.yaml
