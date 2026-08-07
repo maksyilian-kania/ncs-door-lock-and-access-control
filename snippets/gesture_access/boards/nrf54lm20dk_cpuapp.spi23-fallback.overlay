@@ -1,0 +1,75 @@
+/*
+ * Copyright (c) 2026 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+ */
+
+/*
+ * SCENARIO B (fallback) -- camera on &spi23 instead of &spi22.
+ *
+ * NOT wired into snippet.yml by default. Use this file only if wiring the
+ * camera through the DK's expansion header (see the header comment in
+ * nrf54lm20dk_cpuapp.overlay, scenario A) turns out not to work in
+ * practice. To switch: replace the EXTRA_DTC_OVERLAY_FILE entry in
+ * ../snippet.yml with this filename.
+ *
+ * Bus choice: &spi23 is free (not used by NFC/QM35, which share &spi21) and,
+ * on the aliro_adapter shield, its data lines (SCK/MISO/MOSI = P3.8/P3.9/
+ * P3.10) are broken out on connector J2. Unlike scenario A's J20, J2 is a
+ * FEMALE socket (meant for stacking another shield on top), so a
+ * female-terminated camera cable will need male-male jumpers to bridge into
+ * it -- see "Camera SPI pin mapping findings.md" for the full trace.
+ *
+ * CS: P0.1 via connector J4 (same connector family as J2, adjacent to it;
+ * confirmed free -- not used by NFC, QM35, or anything else in this
+ * project). QM35's reset/CS/exton already occupy P3.7/P3.11/P3.12, which is
+ * why CS for the camera is placed on P0.1 instead.
+ */
+
+&pinctrl {
+	spi23_default: spi23_default {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 3, 8)>,
+				<NRF_PSEL(SPIM_MISO, 3, 9)>,
+				<NRF_PSEL(SPIM_MOSI, 3, 10)>;
+		};
+	};
+
+	spi23_sleep: spi23_sleep {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 3, 8)>,
+				<NRF_PSEL(SPIM_MISO, 3, 9)>,
+				<NRF_PSEL(SPIM_MOSI, 3, 10)>;
+			low-power-enable;
+		};
+	};
+};
+
+&spi23 {
+	compatible = "nordic,nrf-spim";
+	status = "okay";
+	pinctrl-0 = <&spi23_default>;
+	pinctrl-1 = <&spi23_sleep>;
+	pinctrl-names = "default", "sleep";
+	cs-gpios = <&gpio0 1 GPIO_ACTIVE_LOW>;
+
+	/*
+	 * Real-time audit (Camera driver plan v2.md, section 5): same
+	 * reasoning as scenario A's &spi22 -- left at the SoC/board default
+	 * (NRF_DEFAULT_IRQ_PRIORITY = 1); re-verify against &spi23's actual
+	 * IRQ number if this scenario is adopted.
+	 */
+
+	zephyr,pm-device-runtime-auto;
+
+	door_lock_spi_cam: door-lock-spi-cam@0 {
+		compatible = "door-lock,spi-cam";
+		reg = <0>;
+		spi-max-frequency = <DT_FREQ_M(8)>;
+		status = "okay";
+	};
+};
+
+&gpio0 {
+	status = "okay";
+};

@@ -1,0 +1,88 @@
+/*
+ * Copyright (c) 2026 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+ */
+
+/*
+ * SCENARIO A (primary/default) -- camera on &spi22.
+ *
+ * &spi22 is otherwise unused by this project: &spi21 already carries both
+ * the NFC reader and the QM35 UWB module (see
+ * applications/*-door-lock-app/boards/nrf54lm20dk_*_cpuapp.overlay and
+ * snippets/uwb_qm35/boards/nrf54lm20dk_cpuapp.overlay), and the release
+ * overlays explicitly disable &spi22, confirming nothing else claims it.
+ * Pin choice mirrors sdk-edge-ai/edge-ai/applications/photo_gesture_detection
+ * (Arducam Mega on &spi22, SCK/MISO/MOSI = P1.4/P1.5/P1.6, CS = P1.7).
+ *
+ * Hardware note (aliro_adapter shield): on this adapter, &spi22's native
+ * breakout connectors (J6/J17) are bottom-layer only and physically
+ * unreachable once the adapter is mounted on the DK. However, P1.4/P1.5/
+ * P1.6/P1.7 are *also* wired to the DK's `nordic_expansion_header` (Arduino-
+ * Uno-R3-compatible) at indices 4/14/13/12 respectively -- see
+ * zephyr/boards/nordic/nrf54lm20dk/nrf54lm20dk_common.dtsi's `gpio-map`.
+ * The adapter breaks that header out on connector J20, which is a MALE
+ * header on the TOP layer, so it mates directly with the camera module's
+ * female cable. Wire the camera to J20 pins 7 (SCK), 17 (MISO), 16 (MOSI),
+ * 15 (CS) -- see "Camera SPI pin mapping findings.md" for the full trace.
+ *
+ * If that wiring turns out not to work in practice, see
+ * nrf54lm20dk_cpuapp.spi23-fallback.overlay for scenario B (&spi23 instead,
+ * reachable only via a female connector -- requires male-male jumpers to
+ * mate with the camera's female cable).
+ */
+
+&pinctrl {
+	spi22_default: spi22_default {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 1, 4)>,
+				<NRF_PSEL(SPIM_MISO, 1, 5)>,
+				<NRF_PSEL(SPIM_MOSI, 1, 6)>;
+		};
+	};
+
+	spi22_sleep: spi22_sleep {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 1, 4)>,
+				<NRF_PSEL(SPIM_MISO, 1, 5)>,
+				<NRF_PSEL(SPIM_MOSI, 1, 6)>;
+			low-power-enable;
+		};
+	};
+};
+
+&spi22 {
+	compatible = "nordic,nrf-spim";
+	status = "okay";
+	pinctrl-0 = <&spi22_default>;
+	pinctrl-1 = <&spi22_sleep>;
+	pinctrl-names = "default", "sleep";
+	cs-gpios = <&gpio1 7 GPIO_ACTIVE_LOW>;
+
+	/*
+	 * Real-time audit (Camera driver plan v2.md, section 5): this is the
+	 * SoC/board default (NRF_DEFAULT_IRQ_PRIORITY = 1), confirmed against
+	 * this build's actual .config -- CONFIG_BT_CTLR_ZLI is not set (no
+	 * zero-latency BLE IRQ competing for this priority level), and every
+	 * BLE/Thread/Aliro *thread* priority in use is a preemptible priority
+	 * (>= 0), which is a different, lower-urgency scheduling class than an
+	 * NVIC IRQ priority of 1. Left at the default rather than guessed at;
+	 * revisit if the real-time regression test (plan section 9) shows
+	 * otherwise.
+	 */
+	interrupts = <200 NRF_DEFAULT_IRQ_PRIORITY>;
+
+	/* Let device PM suspend the bus when the camera is asleep (section 4). */
+	zephyr,pm-device-runtime-auto;
+
+	door_lock_spi_cam: door-lock-spi-cam@0 {
+		compatible = "door-lock,spi-cam";
+		reg = <0>;
+		spi-max-frequency = <DT_FREQ_M(8)>;
+		status = "okay";
+	};
+};
+
+&gpio1 {
+	status = "okay";
+};

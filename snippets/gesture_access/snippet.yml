@@ -8,9 +8,8 @@ name: gesture_access
 append:
   EXTRA_CONF_FILE: gesture_access.conf
 
-# TODO: add one entry per supported board once the SPI camera wiring is
-# finalized
-# boards:
-#   nrf54lm20dk/nrf54lm20a/cpuapp:
-#     append:
-#       EXTRA_DTC_OVERLAY_FILE: boards/nrf54lm20dk_cpuapp.overlay
+
+boards:
+  /nrf54lm20dk\/nrf54lm20[ab]\/cpuapp/:
+    append:
+      EXTRA_DTC_OVERLAY_FILE: boards/nrf54lm20dk_cpuapp.overlay
