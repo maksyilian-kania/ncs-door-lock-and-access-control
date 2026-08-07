@@ -1,0 +1,43 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+config DOOR_LOCK_GESTURE_ACCESS_WORKQUEUE
+	bool "Gesture access work queue"
+	help
+	  Dedicated work queue for gesture-access camera capture/FIFO-drain
+	  and on-device inference work. Selected automatically by
+	  CONFIG_DOOR_LOCK_GESTURE_ACCESS; do not enable directly.
+
+if DOOR_LOCK_GESTURE_ACCESS_WORKQUEUE
+
+config DOOR_LOCK_GESTURE_ACCESS_WORKQUEUE_INIT_PRIORITY
+	int "Gesture access workqueue init priority"
+	default APPLICATION_INIT_PRIORITY
+
+config DOOR_LOCK_GESTURE_ACCESS_WORKQUEUE_STACK_SIZE
+	int "Gesture access workqueue stack size"
+	default 4096
+	help
+	  Stack size for the dedicated gesture-access workqueue thread that
+	  runs camera capture/FIFO-drain work and on-device gesture
+	  inference work.
+
+config DOOR_LOCK_GESTURE_ACCESS_WORKQUEUE_PRIORITY
+	int "Gesture access workqueue priority"
+	default 11
+	help
+	  Cooperative thread priority of the dedicated gesture-access work
+	  queue.
+
+	  PLACEHOLDER VALUE, not yet validated: this has not been checked
+	  against the actual BLE controller/host, OpenThread/Matter, and
+	  subsys/aliro/aliro_workqueue (default priority 10) thread
+	  priorities used in this build. Before this feature ships,
+	  enumerate those priorities and confirm this value is strictly
+	  lower priority (numerically higher) than all of them, per the
+	  real-time/scheduling analysis in the camera driver plan.
+
+endif # DOOR_LOCK_GESTURE_ACCESS_WORKQUEUE

@@ -8,6 +8,7 @@ config DOOR_LOCK_CAMERA_SPI
 	bool "SPI camera driver for gesture access"
 	select SPI
 	select VIDEO
+	select DOOR_LOCK_GESTURE_ACCESS_WORKQUEUE
 	help
 	  Zephyr `video` class driver for the SPI camera module used by the
 	  gesture access feature. Selected automatically by
@@ -18,5 +19,17 @@ if DOOR_LOCK_CAMERA_SPI
 module = DOOR_LOCK_CAMERA_SPI
 module-str = Door Lock SPI camera driver
 source "$(ZEPHYR_BASE)/subsys/logging/Kconfig.template.log_config"
+
+config DOOR_LOCK_CAMERA_SPI_CAPTURE_INTERVAL_MS_DEFAULT
+	int "Default capture cadence, in milliseconds"
+	default 500
+	help
+	  Default period between captures, applied at init and used whenever
+	  VIDEO_CID_SPI_CAM_CAPTURE_INTERVAL_MS has not been set by the
+	  application. This governs gesture-access sampling only; it is
+	  independent of the door lock's own event loop. The driver always
+	  enforces a minimum interval derived from the worst-case capture +
+	  FIFO-read latency of the configured resolution/format, regardless
+	  of this value.
 
 endif # DOOR_LOCK_CAMERA_SPI
