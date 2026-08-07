@@ -6,6 +6,9 @@
 
 zephyr_include_directories(include)
 
+
+zephyr_include_directories(${ZEPHYR_BASE}/drivers/video)
+
 zephyr_library()
 
 zephyr_library_sources(src/spi_cam.c)

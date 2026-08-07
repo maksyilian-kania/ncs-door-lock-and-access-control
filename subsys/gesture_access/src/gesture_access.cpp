@@ -45,13 +45,27 @@ int Init()
 
 int Start()
 {
-	/* TODO: start the capture/inference loop. */
+	/*
+	 * TODO: start the capture/inference loop. Before (re-)starting
+	 * capture, resume the camera device via
+	 * pm_device_action_run(cam_dev, PM_DEVICE_ACTION_RESUME) - see the
+	 * VIDEO_CID_SPI_CAM_LOWPOWER doc comment in spi_cam.h for why this,
+	 * rather than the capture cadence alone, is what actually wakes the
+	 * sensor.
+	 */
 	return 0;
 }
 
 void Stop()
 {
-	/* TODO: stop the capture/inference loop. */
+	/*
+	 * TODO: stop the capture/inference loop, then suspend the camera
+	 * device via pm_device_action_run(cam_dev, PM_DEVICE_ACTION_SUSPEND)
+	 * - decided in Camera driver plan v2.md section 4: this is a
+	 * battery/low-power door lock, so sleeping the sensor is correct,
+	 * not just stopping the capture timer. See the VIDEO_CID_SPI_CAM_LOWPOWER
+	 * doc comment in spi_cam.h.
+	 */
 }
 
 } // namespace DoorLock::GestureAccess
