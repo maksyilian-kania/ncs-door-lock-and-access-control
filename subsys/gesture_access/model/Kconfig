@@ -5,57 +5,21 @@
 #
 
 config DOOR_LOCK_GESTURE_ACCESS_MODEL
-	bool "Gesture access inference model (Edge Impulse SDK + Nordic Axon FOMO model)"
+	bool "Gesture access inference model (direct Nordic Axon FOMO)"
 	select CPP
-	# Not "select STD_CPP11": Kconfig `select` cannot set a choice symbol
-	# (STD_CPP11 is one of lib/cpp/Kconfig's "choice STD_CPP" members) -
-	# this Kconfig version treats that as a fatal error, not just a
-	# warning. Unnecessary anyway: STD_CPP11 is already that choice's
-	# `default` whenever CPP is enabled (see lib/cpp/Kconfig).
-	select REQUIRES_FULL_LIBCPP
-	select CBPRINTF_FP_SUPPORT
-	# Not "select FPU": CONFIG_FPU=y makes edge-ai's lib/axon/CMakeLists.txt
-	# link the hard-float-ABI libnrf-axon-driver-internal-fpu.a instead of
-	# the FP-instruction-free libnrf-axon-driver-internal.a, which then
-	# fails to link against this app's soft-float-ABI prebuilt libaliro.a
-	# ("uses VFP register arguments, ... does not"). Leaving FPU off picks
-	# the FP-free Axon driver variant instead, which is ABI-compatible with
-	# libaliro.a; Edge Impulse's own float DSP/preprocessing code (compiled
-	# from source, not prebuilt) still works without CONFIG_FPU, just via
-	# software float emulation instead of hardware VFP instructions.
 	select NRF_AXON
 	help
-	  Vendors the Edge Impulse SDK plus a single deployed model
-	  ("fomo" - a 96x96 grayscale FOMO object detector targeting the
-	  Nordic Axon NPU) into the build, so gesture_access.cpp can call
-	  run_classifier(). Selected automatically by
+	  Builds a 96x96 grayscale FOMO object detector using the Nordic Axon
+	  NPU directly. Camera bytes are quantized to int8 without a float
+	  feature matrix, and FOMO output is decoded locally without the Edge
+	  Impulse runtime. Selected automatically by
 	  CONFIG_DOOR_LOCK_GESTURE_ACCESS; do not enable directly.
 
-	  This vendors the model's own edge-impulse-sdk/ copy directly rather
-	  than depending on the CONFIG_EDGE_IMPULSE_SDK west-module path - see
-	  subsys/gesture_access/model/CMakeLists.txt and Camera driver plan
-	  v2.md section 8 for why.
-
 	  The model itself is named generically ("fomo", not tied to any one
-	  Edge Impulse export) on purpose, to make swapping in a retrained
-	  model - same architecture, same 96x96 grayscale input, different
-	  weights - a drop-in file replacement instead of a rename+edit. See
-	  "Swapping in a new model" below and Camera driver plan v2.md.
+	  export) so a weights-only retrain with the same tensor and
+	  quantization contract is a drop-in replacement.
 
 if DOOR_LOCK_GESTURE_ACCESS_MODEL
-
-config NRF_AXON_MODEL_NAME
-	string
-	default "fomo"
-	help
-	  Must exactly match the name baked into
-	  nordic-axon-model/nrf_axon_model_<name>_.h at Edge Impulse export
-	  time (the vendored SDK derives both the header's filename and its
-	  top-level model struct name, model_<name>, from this string via
-	  token-pasting in edge-impulse-sdk's nordic_axon.h - it cannot be an
-	  arbitrary/different string from what's actually in that header).
-	  Kept as "fomo" here rather than whatever name Edge Impulse assigned
-	  at export time - see "Swapping in a new model" below.
 
 config NRF_AXON_INTERLAYER_BUFFER_SIZE
 	int
@@ -81,11 +45,7 @@ endif # DOOR_LOCK_GESTURE_ACCESS_MODEL
 # This project is deliberately set up so that swapping in a retrained model
 # - same architecture (FOMO), same 96x96 grayscale input, different weights
 # - is a drop-in file replacement, nothing else:
-#   1. Overwrite subsys/gesture_access/model/model-parameters/model_metadata.h
-#      and model_variables.h with the new export's versions verbatim (these
-#      filenames are already fixed by Edge Impulse convention, no renaming
-#      needed).
-#   2. Overwrite subsys/gesture_access/model/nordic-axon-model/nrf_axon_model_fomo_.h
+#   1. Overwrite subsys/gesture_access/model/nordic-axon-model/nrf_axon_model_fomo_.h
 #      with the new export's Axon model header - but renamed to that exact
 #      filename, and with every occurrence of whatever model name Edge
 #      Impulse assigned at export time (e.g. jfda_detection_26,
@@ -96,12 +56,10 @@ endif # DOOR_LOCK_GESTURE_ACCESS_MODEL
 #      NRF_AXON_MODEL_FOMO_MAX_IL_BUFFER_USED). This is a pure
 #      find-and-replace of one token, safe to script
 #      (sed -i 's/OLD_NAME/fomo/g; s/OLD_NAME_UPPER/FOMO/g' ...).
-#      NRF_AXON_MODEL_NAME above already stays "fomo" - no Kconfig change
-#      needed for a same-architecture swap.
+#   2. Keep the 96x96x1 input, 12x12x2 output, input/output quantization,
+#      class order, and "hand" label contract unchanged. The direct runtime
+#      validates these values during initialization.
 #   3. Only revisit CONFIG_NRF_AXON_INTERLAYER_BUFFER_SIZE above if the new
 #      export's ..._MAX_IL_BUFFER_USED constant is larger than the current
 #      120000 default - shouldn't happen for a weights-only retrain of the
 #      same architecture.
-#   4. Nothing in subsys/gesture_access/model/CMakeLists.txt,
-#      subsys/gesture_access/src/gesture_access.cpp, or anywhere else needs
-#      to change for a same-architecture/same-input-size swap.
