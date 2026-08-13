@@ -172,7 +172,7 @@ int main()
 #endif // CONFIG_DOOR_LOCK_NUS_SERVICE
 
 #ifdef CONFIG_DOOR_LOCK_GESTURE_ACCESS
-
+	LOG_INF("Initializing gesture access");
 	int gestureAccessErr = DoorLock::GestureAccess::Init();
 	VerifyOrDie(gestureAccessErr == 0, "Failed to initialize gesture access");
 	gestureAccessErr = DoorLock::GestureAccess::Start();
@@ -180,7 +180,7 @@ int main()
 
 #endif // CONFIG_DOOR_LOCK_GESTURE_ACCESS
 
-	LOG_INF("Application started");
+	LOG_INF("Application started"); 
 
 	return EXIT_SUCCESS;
 }

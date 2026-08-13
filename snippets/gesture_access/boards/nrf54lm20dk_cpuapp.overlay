@@ -86,3 +86,19 @@
 &gpio1 {
 	status = "okay";
 };
+
+/*
+ * Frame streaming channel for CONFIG_DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING,
+ * on the SoC's native USB port. The controller (usbhs, aliased as
+ * zephyr_udc0) is already enabled by the board, so only the CDC ACM function
+ * is added here. Harmless when the Kconfig option is left off: the node
+ * just goes unused, since frame_forwarding.cpp (the only thing that
+ * DEVICE_DT_GET()s it) is excluded from the build in that case - see
+ * subsys/gesture_access/CMakeLists.txt.
+ */
+&zephyr_udc0 {
+	cdc_acm_frames: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "Gesture access frames";
+	};
+};
