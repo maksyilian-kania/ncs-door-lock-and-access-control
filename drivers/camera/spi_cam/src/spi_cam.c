@@ -21,9 +21,10 @@
  *  - Adds a driver-controlled capture cadence
  *    (VIDEO_CID_SPI_CAM_CAPTURE_INTERVAL_MS) with an enforced minimum
  *    interval, instead of a fixed 30 ms polling period.
- *  - Adds a grayscale pixel format (VIDEO_PIX_FMT_GREY). The sensor has no
- *    native grayscale mode, so this selects the YUYV wire format under the
- *    hood and strips the Y bytes while filling the video_buffer.
+ *  - The camera contract is intentionally fixed to the gesture model input:
+ *    96x96 VIDEO_PIX_FMT_GREY. The sensor has no native grayscale mode, so a
+ *    complete YUYV frame is captured into reusable driver storage and its Y
+ *    bytes are copied into the caller's video_buffer.
  */
 
 #define DT_DRV_COMPAT door_lock_spi_cam
@@ -135,13 +136,6 @@ enum spi_cam_white_balance {
 	SPI_CAM_WHITE_BALANCE_MODE_HOME,
 };
 
-/* Configure JPEG image quality */
-enum spi_cam_image_quality {
-	SPI_CAM_IMAGE_QUALITY_HIGH = 0,
-	SPI_CAM_IMAGE_QUALITY_DEFAULT = 1,
-	SPI_CAM_IMAGE_QUALITY_LOW = 2,
-};
-
 enum {
 	SPI_CAM_SENSOR_5MP_1 = 0x81,
 	SPI_CAM_SENSOR_3MP_1 = 0x82,
@@ -151,8 +145,6 @@ enum {
 
 /* Configure camera pixel format, as sent over the wire to the sensor. */
 enum spi_cam_pixelformat {
-	SPI_CAM_PIXELFORMAT_JPG = 0x01,
-	SPI_CAM_PIXELFORMAT_RGB565 = 0x02,
 	SPI_CAM_PIXELFORMAT_YUV = 0x03,
 };
 
@@ -195,7 +187,6 @@ enum spi_cam_features {
 #define CAM_REG_COLOR_EFFECT_CONTROL          0x27
 #define CAM_REG_SHARPNESS_CONTROL             0x28
 #define CAM_REG_AUTO_FOCUS_CONTROL            0x29
-#define CAM_REG_IMAGE_QUALITY                 0x2A
 #define CAM_REG_EXPOSURE_GAIN_WHITEBAL_ENABLE 0x30
 #define CAM_REG_MANUAL_GAIN_BIT_9_8           0x31
 #define CAM_REG_MANUAL_GAIN_BIT_7_0           0x32
@@ -223,6 +214,10 @@ enum spi_cam_features {
 #define CTR_GAIN         0x00
 
 #define SPI_CAM_CAPTURE_TRIES 200
+#define SPI_CAM_FRAME_WIDTH 96U
+#define SPI_CAM_FRAME_HEIGHT 96U
+#define SPI_CAM_GRAY_FRAME_BYTES (SPI_CAM_FRAME_WIDTH * SPI_CAM_FRAME_HEIGHT)
+#define SPI_CAM_YUYV_FRAME_BYTES (SPI_CAM_GRAY_FRAME_BYTES * 2U)
 
 /*
  * Fixed overhead added on top of the raw SPI transfer time when computing the
@@ -244,7 +239,6 @@ struct spi_cam_ctrls {
 	struct video_ctrl ev;
 	struct video_ctrl whitebal;
 	struct video_ctrl colorfx;
-	struct video_ctrl quality;
 	struct video_ctrl lowpower;
 	struct video_ctrl whitebalauto;
 	struct video_ctrl sharpness;
@@ -258,8 +252,6 @@ struct spi_cam_ctrls {
 	};
 	struct video_ctrl focus_auto;
 	struct video_ctrl capture_interval_ms;
-	/* Read only registers */
-	struct video_ctrl linkfreq;
 };
 
 struct spi_cam_data {
@@ -272,12 +264,12 @@ struct spi_cam_data {
 	struct k_work buf_work;
 	struct k_timer stream_schedule_timer;
 	struct k_poll_signal *signal;
-	uint8_t fifo_first_read;
-	uint32_t fifo_length;
 	uint8_t stream_on;
 	uint32_t features;
 	uint32_t camera_id;
 	uint32_t capture_interval_ms;
+	uint32_t frame_count;
+	uint8_t frame_buf[SPI_CAM_YUYV_FRAME_BYTES] __aligned(4);
 };
 
 #define SPI_CAM_VIDEO_FORMAT_CAP(width, height, format)                                          \
@@ -289,61 +281,15 @@ struct spi_cam_data {
 	 .width_step = 0,                                                                         \
 	 .height_step = 0}
 
-#define SPI_CAM_FMT_BLOCK(format)                                                                 \
-	SPI_CAM_VIDEO_FORMAT_CAP(96, 96, format),                                                 \
-	SPI_CAM_VIDEO_FORMAT_CAP(128, 128, format),                                               \
-	SPI_CAM_VIDEO_FORMAT_CAP(320, 240, format),                                               \
-	SPI_CAM_VIDEO_FORMAT_CAP(320, 320, format),                                               \
-	SPI_CAM_VIDEO_FORMAT_CAP(640, 480, format),                                               \
-	SPI_CAM_VIDEO_FORMAT_CAP(1280, 720, format),                                              \
-	SPI_CAM_VIDEO_FORMAT_CAP(1600, 1200, format),                                             \
-	SPI_CAM_VIDEO_FORMAT_CAP(1920, 1080, format),                                             \
-	{0} /* replaced with the sensor-dependent max resolution in spi_cam_check_connection() */
-
-/*
- * Each format block below has exactly SUPPORT_RESOLUTION_NUM (9) entries, so
- * `index % SUPPORT_RESOLUTION_NUM` always yields the right resolution enum
- * for spi_cam_set_resolution() regardless of which block matched.
- *
- * VIDEO_PIX_FMT_GREY has no native sensor mode: it reuses the YUYV wire
- * format (see spi_cam_set_output_format()) and the Y plane is extracted in
- * spi_cam_fifo_read().
- */
-static struct video_format_cap fmts[] = {
-	SPI_CAM_FMT_BLOCK(VIDEO_PIX_FMT_RGB565),
-	SPI_CAM_FMT_BLOCK(VIDEO_PIX_FMT_JPEG),
-	SPI_CAM_FMT_BLOCK(VIDEO_PIX_FMT_YUYV),
-	SPI_CAM_FMT_BLOCK(VIDEO_PIX_FMT_GREY),
+static const struct video_format_cap fmts[] = {
+	SPI_CAM_VIDEO_FORMAT_CAP(SPI_CAM_FRAME_WIDTH, SPI_CAM_FRAME_HEIGHT,
+				 VIDEO_PIX_FMT_GREY),
 	{0},
 };
 
-#define SPI_CAM_FMT_RGB565_MAX_IDX 8
-#define SPI_CAM_FMT_JPEG_MAX_IDX   17
-#define SPI_CAM_FMT_YUYV_MAX_IDX   26
-#define SPI_CAM_FMT_GREY_MAX_IDX   35
-
 enum spi_cam_resolution {
-	SPI_CAM_RESOLUTION_QQVGA = 0x00,
-	SPI_CAM_RESOLUTION_QVGA = 0x01,
-	SPI_CAM_RESOLUTION_VGA = 0x02,
-	SPI_CAM_RESOLUTION_SVGA = 0x03,
-	SPI_CAM_RESOLUTION_HD = 0x04,
-	SPI_CAM_RESOLUTION_SXGAM = 0x05,
-	SPI_CAM_RESOLUTION_UXGA = 0x06,
-	SPI_CAM_RESOLUTION_FHD = 0x07,
-	SPI_CAM_RESOLUTION_QXGA = 0x08,
-	SPI_CAM_RESOLUTION_WQXGA2 = 0x09,
 	SPI_CAM_RESOLUTION_96X96 = 0x0a,
-	SPI_CAM_RESOLUTION_128X128 = 0x0b,
-	SPI_CAM_RESOLUTION_320X320 = 0x0c,
-	SPI_CAM_RESOLUTION_12 = 0x0d,
-	SPI_CAM_RESOLUTION_13 = 0x0e,
-	SPI_CAM_RESOLUTION_14 = 0x0f,
-	SPI_CAM_RESOLUTION_15 = 0x10,
-	SPI_CAM_RESOLUTION_NONE,
 };
-
-#define SUPPORT_RESOLUTION_NUM 9
 
 /* -------------------------------------------------------------------------
  * Low-level register I/O
@@ -539,9 +485,11 @@ static int spi_cam_set_sharpness(const struct device *dev, enum spi_cam_sharpnes
 	return spi_cam_write_reg_wait(&cfg->spi, CAM_REG_SHARPNESS_CONTROL, level, 3);
 }
 
-static int spi_cam_set_auto_focus(const struct device *dev, enum spi_cam_auto_focus_level level)
+static int spi_cam_set_auto_focus(const struct device *dev, bool enable)
 {
 	const struct spi_cam_config *cfg = dev->config;
+	enum spi_cam_auto_focus_level level =
+		enable ? SPI_CAM_AUTO_FOCUS_ON : SPI_CAM_AUTO_FOCUS_OFF;
 
 	return spi_cam_write_reg_wait(&cfg->spi, CAM_REG_AUTO_FOCUS_CONTROL, level, 3);
 }
@@ -581,32 +529,15 @@ static int spi_cam_set_special_effects(const struct device *dev, enum video_colo
 	return spi_cam_write_reg_wait(&cfg->spi, CAM_REG_COLOR_EFFECT_CONTROL, spi_cam_effect, 3);
 }
 
-static int spi_cam_set_output_format(const struct device *dev, uint32_t pixelformat)
+static int spi_cam_set_output_format(const struct device *dev)
 {
 	const struct spi_cam_config *cfg = dev->config;
-	uint8_t format_val;
 	int ret = 0;
 
-	switch (pixelformat) {
-	case VIDEO_PIX_FMT_JPEG:
-		format_val = SPI_CAM_PIXELFORMAT_JPG;
-		break;
-	case VIDEO_PIX_FMT_RGB565:
-		format_val = SPI_CAM_PIXELFORMAT_RGB565;
-		break;
-	case VIDEO_PIX_FMT_YUYV:
-	case VIDEO_PIX_FMT_GREY:
-		/* No native grayscale sensor mode: capture YUYV on the wire
-		 * and strip the Y bytes in spi_cam_fifo_read().
-		 */
-		format_val = SPI_CAM_PIXELFORMAT_YUV;
-		break;
-	default:
-		LOG_ERR("Image format not supported");
-		return -ENOTSUP;
-	}
-
-	ret = spi_cam_write_reg_wait(&cfg->spi, CAM_REG_FORMAT, format_val, 3);
+	/* The sensor has no native grayscale mode. It always supplies the fixed
+	 * 96x96 model frame as YUYV; the driver exposes only its Y samples.
+	 */
+	ret = spi_cam_write_reg_wait(&cfg->spi, CAM_REG_FORMAT, SPI_CAM_PIXELFORMAT_YUV, 3);
 	if (ret < 0) {
 		return ret;
 	}
@@ -617,19 +548,6 @@ static int spi_cam_set_output_format(const struct device *dev, uint32_t pixelfor
 	}
 
 	return ret;
-}
-
-static int spi_cam_set_jpeg_quality(const struct device *dev, enum spi_cam_image_quality qc)
-{
-	const struct spi_cam_config *cfg = dev->config;
-	struct spi_cam_data *drv_data = dev->data;
-
-	if (drv_data->fmt.pixelformat != VIDEO_PIX_FMT_JPEG) {
-		LOG_ERR("Image format does not support setting JPEG quality");
-		return -ENOTSUP;
-	}
-
-	return spi_cam_write_reg_wait(&cfg->spi, CAM_REG_IMAGE_QUALITY, qc, 3);
 }
 
 static int spi_cam_set_white_bal_enable(const struct device *dev, int enable)
@@ -853,38 +771,20 @@ static int spi_cam_check_connection(const struct device *dev)
 	}
 	drv_data->features = SPI_CAM_HAS_DEFAULT;
 
-	uint32_t rgb565_w, rgb565_h, jpeg_w, jpeg_h, yuyv_w, yuyv_h;
-
 	switch (cam_id) {
 	case SPI_CAM_SENSOR_5MP_1:
-		rgb565_w = jpeg_w = yuyv_w = 2592;
-		rgb565_h = jpeg_h = yuyv_h = 1944;
 		drv_data->features |= SPI_CAM_HAS_FOCUS | SPI_CAM_HAS_COLORFX;
 		break;
 	case SPI_CAM_SENSOR_3MP_1:
 	case SPI_CAM_SENSOR_3MP_2:
-		rgb565_w = jpeg_w = yuyv_w = 2048;
-		rgb565_h = jpeg_h = yuyv_h = 1536;
 		drv_data->features |= SPI_CAM_HAS_SHARPNESS | SPI_CAM_HAS_COLORFX;
 		break;
 	case SPI_CAM_SENSOR_5MP_2:
-		rgb565_w = jpeg_w = yuyv_w = 2592;
-		rgb565_h = jpeg_h = yuyv_h = 1936;
 		drv_data->features |= SPI_CAM_HAS_FOCUS | SPI_CAM_HAS_COLORFX;
 		break;
 	default:
 		return -ENODEV;
 	}
-
-	fmts[SPI_CAM_FMT_RGB565_MAX_IDX] =
-		(struct video_format_cap)SPI_CAM_VIDEO_FORMAT_CAP(rgb565_w, rgb565_h,
-								   VIDEO_PIX_FMT_RGB565);
-	fmts[SPI_CAM_FMT_JPEG_MAX_IDX] = (struct video_format_cap)SPI_CAM_VIDEO_FORMAT_CAP(
-		jpeg_w, jpeg_h, VIDEO_PIX_FMT_JPEG);
-	fmts[SPI_CAM_FMT_YUYV_MAX_IDX] = (struct video_format_cap)SPI_CAM_VIDEO_FORMAT_CAP(
-		yuyv_w, yuyv_h, VIDEO_PIX_FMT_YUYV);
-	fmts[SPI_CAM_FMT_GREY_MAX_IDX] = (struct video_format_cap)SPI_CAM_VIDEO_FORMAT_CAP(
-		yuyv_w, yuyv_h, VIDEO_PIX_FMT_GREY);
 
 	drv_data->camera_id = cam_id;
 
@@ -899,11 +799,17 @@ static int spi_cam_set_format(const struct device *dev, struct video_format *fmt
 {
 	struct spi_cam_data *drv_data = dev->data;
 	int ret = 0;
-	size_t i = 0;
 
 	if (!memcmp(&drv_data->fmt, fmt, sizeof(drv_data->fmt))) {
 		/* nothing to do */
 		return 0;
+	}
+
+	if (fmt->type != VIDEO_BUF_TYPE_OUTPUT || fmt->pixelformat != VIDEO_PIX_FMT_GREY ||
+	    fmt->width != SPI_CAM_FRAME_WIDTH || fmt->height != SPI_CAM_FRAME_HEIGHT) {
+		LOG_ERR("Unsupported pixel format or resolution %s %ux%u",
+			VIDEO_FOURCC_TO_STR(fmt->pixelformat), fmt->width, fmt->height);
+		return -ENOTSUP;
 	}
 
 	ret = video_estimate_fmt_size(fmt);
@@ -911,24 +817,17 @@ static int spi_cam_set_format(const struct device *dev, struct video_format *fmt
 		return ret;
 	}
 
-	ret = video_format_caps_index(fmts, fmt, &i);
+	ret = spi_cam_set_output_format(dev);
 	if (ret < 0) {
-		LOG_ERR("Unsupported pixel format or resolution %s %ux%u",
-			VIDEO_FOURCC_TO_STR(fmt->pixelformat), fmt->width, fmt->height);
+		return ret;
+	}
+
+	ret = spi_cam_set_resolution(dev, SPI_CAM_RESOLUTION_96X96);
+	if (ret < 0) {
 		return ret;
 	}
 
 	drv_data->fmt = *fmt;
-
-	ret = spi_cam_set_output_format(dev, fmt->pixelformat);
-	if (ret < 0) {
-		return ret;
-	}
-
-	ret = spi_cam_set_resolution(dev, i % SUPPORT_RESOLUTION_NUM);
-	if (ret < 0) {
-		return ret;
-	}
 
 	return 0;
 }
@@ -964,8 +863,11 @@ static uint32_t spi_cam_min_capture_interval_ms(const struct device *dev)
 		return CONFIG_DOOR_LOCK_CAMERA_SPI_CAPTURE_INTERVAL_MS_DEFAULT;
 	}
 
-	/* Single SPI data line, 8 bits per clock: ceil(bytes * 8 * 1000 / Hz). */
-	transfer_ms = (uint32_t)(((uint64_t)drv_data->fmt.size * 8ULL * 1000ULL + freq_hz - 1) /
+	/* The video output is one byte per pixel, but two YUYV bytes per pixel
+	 * must be transferred from the sensor.
+	 */
+	transfer_ms = (uint32_t)(((uint64_t)SPI_CAM_YUYV_FRAME_BYTES * 8ULL * 1000ULL +
+				  freq_hz - 1) /
 				 freq_hz);
 
 	return transfer_ms + SPI_CAM_CAPTURE_OVERHEAD_MS;
@@ -1017,7 +919,6 @@ static int spi_cam_stream_start(const struct device *dev, bool enable, enum vide
 
 	if (enable) {
 		drv_data->stream_on = 1;
-		drv_data->fifo_length = 0;
 		k_timer_start(&drv_data->stream_schedule_timer,
 			      K_MSEC(drv_data->capture_interval_ms),
 			      K_MSEC(drv_data->capture_interval_ms));
@@ -1074,12 +975,19 @@ static int spi_cam_soft_reset(const struct device *dev)
 static int spi_cam_capture(const struct device *dev, uint32_t *length)
 {
 	const struct spi_cam_config *cfg = dev->config;
-	struct spi_cam_data *drv_data = dev->data;
-	int ret = 0;
+	bool capture_done = false;
+	int ret;
 	uint32_t reg_data;
 
-	spi_cam_write_reg(&cfg->spi, ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
-	spi_cam_write_reg(&cfg->spi, ARDUCHIP_FIFO, FIFO_START_MASK);
+	ret = spi_cam_write_reg(&cfg->spi, ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = spi_cam_write_reg(&cfg->spi, ARDUCHIP_FIFO, FIFO_START_MASK);
+	if (ret < 0) {
+		return ret;
+	}
 
 	for (int tries = SPI_CAM_CAPTURE_TRIES; tries > 0; tries--) {
 		ret = spi_cam_read_reg(&cfg->spi, ARDUCHIP_TRIG, &reg_data);
@@ -1089,10 +997,16 @@ static int spi_cam_capture(const struct device *dev, uint32_t *length)
 		}
 
 		if (reg_data & CAP_DONE_MASK) {
+			capture_done = true;
 			break;
 		}
 
 		k_msleep(2);
+	}
+
+	if (!capture_done) {
+		LOG_ERR("Capture timeout");
+		return -ETIMEDOUT;
 	}
 
 	ret = spi_cam_read_reg(&cfg->spi, FIFO_SIZE1, &reg_data);
@@ -1100,117 +1014,83 @@ static int spi_cam_capture(const struct device *dev, uint32_t *length)
 		LOG_ERR("Failed to read the fifo1 size (%d)", ret);
 		return ret;
 	}
-	drv_data->fifo_length = reg_data;
+	*length = reg_data;
 	ret = spi_cam_read_reg(&cfg->spi, FIFO_SIZE2, &reg_data);
 	if (ret < 0) {
 		LOG_ERR("Failed to read the fifo2 size (%d)", ret);
 		return ret;
 	}
-	drv_data->fifo_length |= reg_data << 8;
+	*length |= reg_data << 8;
 	ret = spi_cam_read_reg(&cfg->spi, FIFO_SIZE3, &reg_data);
 	if (ret < 0) {
 		LOG_ERR("Failed to read the fifo3 size (%d)", ret);
 		return ret;
 	}
-	drv_data->fifo_length |= reg_data << 16;
-
-	drv_data->fifo_first_read = 1;
-	*length = drv_data->fifo_length;
+	*length |= reg_data << 16;
 	return 0;
 }
 
-/*
- * Scratch chunk size used to read raw YUYV wire bytes off the SPI bus when
- * extracting a grayscale (Y-only) frame. Kept small and on-stack: it does
- * not need to hold a whole frame, only enough to make the burst reads
- * efficient. The gesture-access work queue stack
- * (CONFIG_DOOR_LOCK_GESTURE_ACCESS_WORKQUEUE_STACK_SIZE) must be able to fit
- * this on top of the rest of spi_cam_buffer_work()'s call chain.
- */
-#define SPI_CAM_GRAY_CHUNK_WIRE_BYTES 256
-
-static int spi_cam_fifo_read_gray(const struct device *dev, struct video_buffer *buf)
+static int spi_cam_fifo_read(const struct device *dev, struct video_buffer *buf,
+			     uint32_t fifo_length)
 {
 	const struct spi_cam_config *cfg = dev->config;
 	struct spi_cam_data *drv_data = dev->data;
-	uint8_t wire[SPI_CAM_GRAY_CHUNK_WIRE_BYTES];
-	/* Sensor emits YUYV (2 bytes/pixel); only the Y byte of every pixel
-	 * is kept, so at most 2x the caller's remaining buffer is consumed
-	 * from the FIFO.
-	 */
-	uint32_t max_wire_len = (uint32_t)buf->size * 2;
-	uint32_t total_wire_len =
-		drv_data->fifo_length > max_wire_len ? max_wire_len : drv_data->fifo_length;
-	uint32_t wire_read = 0;
-	uint32_t pixels_written = 0;
+	int ret;
 
-	while (wire_read < total_wire_len) {
-		uint32_t chunk_len = total_wire_len - wire_read;
-		int ret;
-
-		if (chunk_len > sizeof(wire)) {
-			chunk_len = sizeof(wire);
-		}
-		/* Burst reads must consume an even number of wire bytes to
-		 * stay pixel (Y,U/V pair) aligned; any odd remainder is
-		 * picked up by the final, smaller chunk.
-		 */
-		chunk_len &= ~1U;
-		if (chunk_len == 0) {
-			break;
-		}
-
-		ret = spi_cam_read_block(&cfg->spi, wire, chunk_len,
-					 drv_data->fifo_first_read && wire_read == 0);
-		if (ret < 0) {
-			LOG_ERR("Failed to read block (%d)", ret);
-			return ret;
-		}
-
-		for (uint32_t i = 0; i < chunk_len / 2; i++) {
-			buf->buffer[pixels_written++] = wire[i * 2];
-		}
-
-		wire_read += chunk_len;
+	if (fifo_length != SPI_CAM_YUYV_FRAME_BYTES) {
+		LOG_ERR("Unexpected YUYV frame size %u (expected %u)", fifo_length,
+			SPI_CAM_YUYV_FRAME_BYTES);
+		return -EMSGSIZE;
 	}
 
-	drv_data->fifo_length -= wire_read;
-	buf->bytesused = pixels_written;
-
-	return 0;
-}
-
-static int spi_cam_fifo_read(const struct device *dev, struct video_buffer *buf)
-{
-	int ret = 0;
-	int32_t rlen;
-	const struct spi_cam_config *cfg = dev->config;
-	struct spi_cam_data *drv_data = dev->data;
-
-	if (drv_data->fmt.pixelformat == VIDEO_PIX_FMT_GREY) {
-		ret = spi_cam_fifo_read_gray(dev, buf);
-		if (ret < 0) {
-			return ret;
-		}
-		drv_data->fifo_first_read = 0;
-		return 0;
+	if (buf->size < SPI_CAM_GRAY_FRAME_BYTES) {
+		LOG_ERR("Video buffer too small: %u (need %u)", (uint32_t)buf->size,
+			SPI_CAM_GRAY_FRAME_BYTES);
+		return -ENOBUFS;
 	}
 
-	rlen = buf->size > drv_data->fifo_length ? drv_data->fifo_length : buf->size;
-
-	LOG_DBG("read fifo: %u. - fifo_length %u", buf->size, drv_data->fifo_length);
-
-	ret = spi_cam_read_block(&cfg->spi, buf->buffer, rlen, drv_data->fifo_first_read);
+	ret = spi_cam_read_block(&cfg->spi, drv_data->frame_buf, SPI_CAM_YUYV_FRAME_BYTES, true);
 	if (ret < 0) {
 		LOG_ERR("Failed to read block (%d)", ret);
 		return ret;
 	}
 
-	drv_data->fifo_length -= rlen;
-	buf->bytesused = rlen;
-	if (drv_data->fifo_first_read) {
-		drv_data->fifo_first_read = 0;
+	drv_data->frame_count++;
+	if (drv_data->frame_count <= 8U) {
+		uint32_t even_sum = 0;
+		uint32_t odd_sum = 0;
+		uint8_t even_min = UINT8_MAX;
+		uint8_t even_max = 0;
+		uint8_t odd_min = UINT8_MAX;
+		uint8_t odd_max = 0;
+
+		for (size_t i = 0; i < SPI_CAM_GRAY_FRAME_BYTES; i++) {
+			uint8_t even = drv_data->frame_buf[i * 2U];
+			uint8_t odd = drv_data->frame_buf[i * 2U + 1U];
+
+			even_min = MIN(even_min, even);
+			even_max = MAX(even_max, even);
+			odd_min = MIN(odd_min, odd);
+			odd_max = MAX(odd_max, odd);
+			even_sum += even;
+			odd_sum += odd;
+		}
+
+		LOG_INF("Raw frame %u even[min=%u max=%u avg=%u] odd[min=%u max=%u avg=%u]",
+			drv_data->frame_count, even_min, even_max,
+			even_sum / SPI_CAM_GRAY_FRAME_BYTES, odd_min, odd_max,
+			odd_sum / SPI_CAM_GRAY_FRAME_BYTES);
 	}
+
+	/* YUYV stores one luminance byte for every pixel at each even index.
+	 * Compact those bytes in place; the next capture overwrites this storage.
+	 */
+	for (size_t i = 0; i < SPI_CAM_GRAY_FRAME_BYTES; i++) {
+		drv_data->frame_buf[i] = drv_data->frame_buf[i * 2U];
+	}
+
+	memcpy(buf->buffer, drv_data->frame_buf, SPI_CAM_GRAY_FRAME_BYTES);
+	buf->bytesused = SPI_CAM_GRAY_FRAME_BYTES;
 
 	return 0;
 }
@@ -1218,32 +1098,35 @@ static int spi_cam_fifo_read(const struct device *dev, struct video_buffer *buf)
 static void spi_cam_buffer_work(struct k_work *work)
 {
 	struct spi_cam_data *drv_data = CONTAINER_OF(work, struct spi_cam_data, buf_work);
-	static uint32_t f_timestamp, f_length;
 	struct video_buffer *vbuf;
-	int ret = 0;
+	uint32_t fifo_length;
+	int ret;
+
+	if (!drv_data->stream_on) {
+		return;
+	}
 
 	vbuf = k_fifo_get(&drv_data->fifo_in, K_NO_WAIT);
 	if (vbuf == NULL) {
-		GestureAccessWorkqueueSubmit(&drv_data->buf_work);
 		return;
 	}
 
-	if (drv_data->fifo_length == 0) {
-		spi_cam_capture(drv_data->dev, &f_length);
-		f_timestamp = k_uptime_get_32();
-	}
-
-	ret = spi_cam_fifo_read(drv_data->dev, vbuf);
+	ret = spi_cam_capture(drv_data->dev, &fifo_length);
 	if (ret < 0) {
-		LOG_ERR("failed to read a buffer (%d)", ret);
+		LOG_ERR("Failed to capture frame (%d)", ret);
+		k_fifo_put(&drv_data->fifo_in, vbuf);
 		return;
 	}
 
-	if (drv_data->fifo_length != 0) {
-		GestureAccessWorkqueueSubmit(&drv_data->buf_work);
+	vbuf->timestamp = k_uptime_get_32();
+
+	ret = spi_cam_fifo_read(drv_data->dev, vbuf, fifo_length);
+	if (ret < 0) {
+		LOG_ERR("Failed to read frame (%d)", ret);
+		k_fifo_put(&drv_data->fifo_in, vbuf);
+		return;
 	}
 
-	vbuf->timestamp = f_timestamp;
 	k_fifo_put(&drv_data->fifo_out, vbuf);
 }
 
@@ -1317,8 +1200,6 @@ static int spi_cam_set_ctrl(const struct device *dev, uint32_t id)
 		return spi_cam_set_white_bal(dev, drv_data->ctrls.whitebal.val);
 	case VIDEO_CID_CONTRAST:
 		return spi_cam_set_contrast(dev, drv_data->ctrls.contrast.val);
-	case VIDEO_CID_JPEG_COMPRESSION_QUALITY:
-		return spi_cam_set_jpeg_quality(dev, drv_data->ctrls.quality.val);
 	case VIDEO_CID_AUTO_EXPOSURE_BIAS:
 		return spi_cam_set_ev(dev, drv_data->ctrls.ev.val);
 	case VIDEO_CID_SHARPNESS:
@@ -1354,15 +1235,6 @@ static DEVICE_API(video, spi_cam_driver_api) = {
 	.flush = spi_cam_flush,
 	.enqueue = spi_cam_enqueue,
 	.dequeue = spi_cam_dequeue,
-};
-
-#define SPI_CAM_640_480_LINK_FREQ      120000000
-#define SPI_CAM_640_480_LINK_FREQ_ID   0
-#define SPI_CAM_1600_1200_LINK_FREQ    240000000
-#define SPI_CAM_1600_1200_LINK_FREQ_ID 1
-static const int64_t spi_cam_link_frequency[] = {
-	SPI_CAM_640_480_LINK_FREQ,
-	SPI_CAM_1600_1200_LINK_FREQ,
 };
 
 static int spi_cam_init_controls(const struct device *dev)
@@ -1445,12 +1317,6 @@ static int spi_cam_init_controls(const struct device *dev)
 		return ret;
 	}
 	ret = video_init_ctrl(
-		&ctrls->quality, dev, VIDEO_CID_JPEG_COMPRESSION_QUALITY,
-		(struct video_ctrl_range){.min = 0, .max = 65535, .step = 1, .def = 0});
-	if (ret < 0) {
-		return ret;
-	}
-	ret = video_init_ctrl(
 		&ctrls->lowpower, dev, VIDEO_CID_SPI_CAM_LOWPOWER,
 		(struct video_ctrl_range){.min = 0, .max = 65535, .step = 1, .def = 0});
 	if (ret < 0) {
@@ -1469,20 +1335,11 @@ static int spi_cam_init_controls(const struct device *dev)
 	if (drv_data->features & SPI_CAM_HAS_FOCUS) {
 		ret = video_init_ctrl(
 			&ctrls->focus_auto, dev, VIDEO_CID_FOCUS_AUTO,
-			(struct video_ctrl_range){.min = 0, .max = 65535, .step = 1, .def = 0});
+			(struct video_ctrl_range){.min = 0, .max = 1, .step = 1, .def = 0});
 		if (ret < 0) {
 			return ret;
 		}
 	}
-	/* Read only controls */
-	ret = video_init_int_menu_ctrl(&ctrls->linkfreq, dev, VIDEO_CID_LINK_FREQ,
-				       SPI_CAM_640_480_LINK_FREQ_ID, spi_cam_link_frequency,
-				       ARRAY_SIZE(spi_cam_link_frequency));
-	if (ret < 0) {
-		return ret;
-	}
-	ctrls->linkfreq.flags |= VIDEO_CTRL_FLAG_READ_ONLY;
-
 	return 0;
 }
 
@@ -1494,7 +1351,7 @@ static int spi_cam_init(const struct device *dev)
 {
 	const struct spi_cam_config *cfg = dev->config;
 	struct spi_cam_data *drv_data = dev->data;
-	struct video_format fmt;
+	struct video_format fmt = {0};
 	int ret = 0;
 	uint32_t reg_data;
 
@@ -1562,9 +1419,9 @@ static int spi_cam_init(const struct device *dev)
 
 	/* set default/init format */
 	fmt.type = VIDEO_BUF_TYPE_OUTPUT;
-	fmt.pixelformat = VIDEO_PIX_FMT_RGB565;
-	fmt.width = 320;
-	fmt.height = 240;
+	fmt.pixelformat = VIDEO_PIX_FMT_GREY;
+	fmt.width = SPI_CAM_FRAME_WIDTH;
+	fmt.height = SPI_CAM_FRAME_HEIGHT;
 
 	ret = spi_cam_set_format(dev, &fmt);
 	if (ret < 0) {
@@ -1583,8 +1440,7 @@ static int spi_cam_init(const struct device *dev)
 	static const struct spi_cam_config spi_cam_config_##inst = {                             \
 		.spi = SPI_DT_SPEC_INST_GET(                                                      \
 			inst,                                                                     \
-			SPI_OP_MODE_MASTER | SPI_WORD_SET(8) | SPI_LINES_SINGLE | SPI_LOCK_ON,    \
-			0),                                                                       \
+			SPI_OP_MODE_MASTER | SPI_WORD_SET(8) | SPI_LINES_SINGLE | SPI_LOCK_ON),   \
 	};                                                                                         \
                                                                                                    \
 	static struct spi_cam_data spi_cam_data_##inst;                                          \

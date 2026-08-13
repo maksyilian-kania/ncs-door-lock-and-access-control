@@ -19,11 +19,13 @@ config DOOR_LOCK_GESTURE_ACCESS_WORKQUEUE_INIT_PRIORITY
 
 config DOOR_LOCK_GESTURE_ACCESS_WORKQUEUE_STACK_SIZE
 	int "Gesture access workqueue stack size"
-	default 4096
+	default 16384
 	help
 	  Stack size for the dedicated gesture-access workqueue thread that
 	  runs camera capture/FIFO-drain work and on-device gesture
-	  inference work.
+	  inference work. Edge Impulse's first Nordic Axon inference performs
+	  C++ model setup on this stack, so the smaller camera-only stack is
+	  insufficient.
 
 config DOOR_LOCK_GESTURE_ACCESS_WORKQUEUE_PRIORITY
 	int "Gesture access workqueue priority"

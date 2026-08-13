@@ -19,9 +19,16 @@ int main()
 #ifdef CONFIG_DOOR_LOCK_GESTURE_ACCESS
 
 	int gestureAccessErr = DoorLock::GestureAccess::Init();
-	VerifyOrDie(gestureAccessErr == 0, "Failed to initialize gesture access");
+	if (gestureAccessErr != 0) {
+		LOG_ERR("Failed to initialize gesture access: %d", gestureAccessErr);
+		return EXIT_FAILURE;
+	}
+
 	gestureAccessErr = DoorLock::GestureAccess::Start();
-	VerifyOrDie(gestureAccessErr == 0, "Failed to start gesture access");
+	if (gestureAccessErr != 0) {
+		LOG_ERR("Failed to start gesture access: %d", gestureAccessErr);
+		return EXIT_FAILURE;
+	}
 
 #endif // CONFIG_DOOR_LOCK_GESTURE_ACCESS
 

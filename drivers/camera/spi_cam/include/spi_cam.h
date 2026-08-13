@@ -19,6 +19,10 @@
  * This header only adds the vendor-specific controls that do not fit the
  * generic video control IDs, following the same pattern as
  * zephyr/include/zephyr/drivers/video/arducam_mega.h.
+ *
+ * The only supported video format is 96x96 VIDEO_PIX_FMT_GREY. The sensor
+ * captures YUYV into an internal driver buffer that is overwritten for every
+ * frame; dequeued caller-owned buffers contain exactly 9216 grayscale bytes.
  */
 
 #include <zephyr/drivers/video-controls.h>

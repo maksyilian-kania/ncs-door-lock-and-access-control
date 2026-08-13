@@ -71,6 +71,9 @@ uint8_t sFrameBuf[kFrameBytes];
 
 bool sStreaming;
 k_work_delayable sInferenceWork;
+uint32_t sCapturedFrameSeq;
+uint32_t sPreviousFrameChecksum;
+uint32_t sRepeatedFrameCount;
 
 /**
  * @brief Decode one grayscale byte into the packed-RGB888-in-a-float
@@ -93,6 +96,51 @@ int GetImageData(size_t offset, size_t length, float *out_ptr)
 	}
 
 	return 0;
+}
+
+void LogFrameDiagnostics()
+{
+	uint8_t minValue = UINT8_MAX;
+	uint8_t maxValue = 0;
+	uint32_t sum = 0;
+	uint32_t horizontalDeltaSum = 0;
+	uint32_t checksum = 2166136261U;
+
+	for (size_t i = 0; i < ARRAY_SIZE(sFrameBuf); i++) {
+		const uint8_t value = sFrameBuf[i];
+
+		minValue = MIN(minValue, value);
+		maxValue = MAX(maxValue, value);
+		sum += value;
+		checksum = (checksum ^ value) * 16777619U;
+
+		if ((i % kCaptureWidth) != 0U) {
+			const uint8_t previous = sFrameBuf[i - 1U];
+			horizontalDeltaSum += value > previous ? value - previous : previous - value;
+		}
+	}
+
+	sCapturedFrameSeq++;
+	if (checksum == sPreviousFrameChecksum) {
+		sRepeatedFrameCount++;
+	} else {
+		sRepeatedFrameCount = 0;
+	}
+	sPreviousFrameChecksum = checksum;
+
+	const uint32_t horizontalPairCount = kCaptureHeight * (kCaptureWidth - 1U);
+	if (sCapturedFrameSeq <= 8U || (sCapturedFrameSeq % 32U) == 0U) {
+		LOG_INF("Frame %u: min=%u max=%u avg=%u avg_dx=%u checksum=%08x repeats=%u",
+			sCapturedFrameSeq, minValue, maxValue, sum / kFrameBytes,
+			horizontalDeltaSum / horizontalPairCount, checksum, sRepeatedFrameCount);
+	}
+
+	if ((uint32_t)(maxValue - minValue) < 8U) {
+		LOG_WRN("Frame %u has almost no luminance range", sCapturedFrameSeq);
+	}
+	if (sRepeatedFrameCount == 4U) {
+		LOG_WRN("Camera returned five identical frames");
+	}
 }
 
 void LogDetectionResult(const ei_impulse_result_t &result)
@@ -213,7 +261,7 @@ void ForwardFrame(const ei_impulse_result_t &result)
 
 void RunInference()
 {
-	ei_impulse_result_t result;
+	ei_impulse_result_t result = {};
 	signal_t features_signal = {
 		.get_data = GetImageData,
 		.total_length = EI_CLASSIFIER_RAW_SAMPLE_COUNT,
@@ -264,12 +312,21 @@ void InferenceWorkHandler(struct k_work *work)
 		return;
 	}
 
-	const size_t chunk = MIN(vbuf->bytesused, sizeof(sFrameBuf));
+	if (vbuf->bytesused != sizeof(sFrameBuf)) {
+		LOG_WRN("Dropping malformed frame: got %zu bytes, expected %zu", vbuf->bytesused,
+			sizeof(sFrameBuf));
+		vbuf->type = VIDEO_BUF_TYPE_OUTPUT;
+		video_enqueue(sCamDev, vbuf);
+		GestureAccessWorkqueueReschedule(&sInferenceWork, kDequeueRetryDelay);
+		return;
+	}
 
-	memcpy(sFrameBuf, vbuf->buffer, chunk);
+	memcpy(sFrameBuf, vbuf->buffer, sizeof(sFrameBuf));
 
 	vbuf->type = VIDEO_BUF_TYPE_OUTPUT;
 	video_enqueue(sCamDev, vbuf);
+
+	LogFrameDiagnostics();
 
 	/*
 	 * run_classifier() is event-blocking on the Axon NPU (ISR + semaphore,
