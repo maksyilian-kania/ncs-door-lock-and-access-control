@@ -1,0 +1,12 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+zephyr_library()
+
+zephyr_library_sources(src/gesture_access_model.cpp)
+
+zephyr_include_directories(include)
+zephyr_include_directories(nordic-axon-model)

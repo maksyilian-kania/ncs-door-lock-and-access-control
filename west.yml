@@ -13,6 +13,13 @@ manifest:
       repo-path: sdk-nrf
       revision: v3.4.0
       import: true
+    - name: edge-ai
+      remote: ncs
+      repo-path: sdk-edge-ai
+      revision: v2.2.0
+      path: edge-ai
+      groups:
+        - sdk-edge-ai
     - name: qm35-aliro-sdk
       url: https://gitlab.com/qorvo_sdk/public/devkits/qm35-aliro-sdk
       revision: v1.1.0
@@ -34,3 +41,4 @@ manifest:
     - -qm35-aliro-sdk
     - -ncs-door-lock-app-extensions
     - -vendor1
+    - -sdk-edge-ai

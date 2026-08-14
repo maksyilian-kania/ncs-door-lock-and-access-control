@@ -1,0 +1,56 @@
+/*
+ * Copyright (c) 2026 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+ */
+
+
+&pinctrl {
+	spi22_default: spi22_default {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 1, 4)>,
+				<NRF_PSEL(SPIM_MISO, 1, 5)>,
+				<NRF_PSEL(SPIM_MOSI, 1, 6)>;
+		};
+	};
+
+	spi22_sleep: spi22_sleep {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 1, 4)>,
+				<NRF_PSEL(SPIM_MISO, 1, 5)>,
+				<NRF_PSEL(SPIM_MOSI, 1, 6)>;
+			low-power-enable;
+		};
+	};
+};
+
+&spi22 {
+	compatible = "nordic,nrf-spim";
+	status = "okay";
+	pinctrl-0 = <&spi22_default>;
+	pinctrl-1 = <&spi22_sleep>;
+	pinctrl-names = "default", "sleep";
+	cs-gpios = <&gpio1 7 GPIO_ACTIVE_LOW>;
+
+	interrupts = <200 NRF_DEFAULT_IRQ_PRIORITY>;
+
+	zephyr,pm-device-runtime-auto;
+
+	door_lock_spi_cam: door-lock-spi-cam@0 {
+		compatible = "door-lock,spi-cam";
+		reg = <0>;
+		spi-max-frequency = <DT_FREQ_M(8)>;
+		status = "okay";
+	};
+};
+
+&gpio1 {
+	status = "okay";
+};
+
+&zephyr_udc0 {
+	cdc_acm_frames: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "Gesture access frames";
+	};
+};
