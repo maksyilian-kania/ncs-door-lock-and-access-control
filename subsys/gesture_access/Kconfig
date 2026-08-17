@@ -8,9 +8,7 @@ menuconfig DOOR_LOCK_GESTURE_ACCESS
 	bool "Door Lock gesture access (SPI camera + on-device inference)"
 	select CPP
 	select DOOR_LOCK_GESTURE_ACCESS_WORKQUEUE
-	# TODO: select DOOR_LOCK_CAMERA_SPI once the camera driver is wired
-	# back in (a patched upstream Zephyr video driver, not the bespoke
-	# spi_cam driver this feature used to carry).
+	select DOOR_LOCK_GESTURE_ACCESS_MODEL
 	help
 	  Enables gesture-based access control using an SPI camera and
 	  on-device inference from the nRF Edge AI SDK (sdk-edge-ai). Off by
@@ -36,5 +34,6 @@ config DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING
 	  and per-frame transmit overhead purely for debugging.
 
 rsource "gesture_access_workqueue/Kconfig"
+rsource "model/Kconfig"
 
 endif # DOOR_LOCK_GESTURE_ACCESS
