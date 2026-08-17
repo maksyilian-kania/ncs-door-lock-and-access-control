@@ -30,14 +30,12 @@
 	pinctrl-0 = <&spi22_default>;
 	pinctrl-1 = <&spi22_sleep>;
 	pinctrl-names = "default", "sleep";
+	overrun-character = <0x00>;
+	zephyr,pm-device-runtime-auto;
 	cs-gpios = <&gpio1 7 GPIO_ACTIVE_LOW>;
 
-	interrupts = <200 NRF_DEFAULT_IRQ_PRIORITY>;
-
-	zephyr,pm-device-runtime-auto;
-
-	door_lock_spi_cam: door-lock-spi-cam@0 {
-		compatible = "door-lock,spi-cam";
+	arducam_mega: arducam-mega@0 {
+		compatible = "arducam,mega";
 		reg = <0>;
 		spi-max-frequency = <DT_FREQ_M(8)>;
 		status = "okay";

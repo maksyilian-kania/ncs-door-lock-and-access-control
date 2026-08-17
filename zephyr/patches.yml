@@ -17,3 +17,39 @@ patches:
     author: Adrian Gielniewski
     email: adrian.gielniewski@nordicsemi.no
     date: 2026-07-23
+  - path: arducam/0001-drivers-video-arducam-fix-compilation-errors.patch
+    sha256sum: d2bd1267ea5c0791626c4ceb3f5c06c1083ca3fa2d6c055288a8fa52014091a0  
+    module: zephyr
+    author: Franciszek Urbanski
+    email: franciszek.urbanski@nordicsemi.no
+    date: 2026-08-17
+  - path: arducam/0002-drivers-video-arducam-fix-VIDEO_CID_FOCUS_AUTO-contr.patch
+    sha256sum: a607e33cc4d5639349e357716efb2da7587fd56740e93fceb9049d41fbc3c43a  
+    module: zephyr
+    author: Franciszek Urbanski
+    email: franciszek.urbanski@nordicsemi.no
+    date: 2026-08-17
+  - path: arducam/0003-drivers-video-arducam-fix-format-to-resolution-mappi.patch
+    sha256sum: 0e6082d2ad2972231c57d0a013d1121bb2bb752c5d7cefc69919cfcda9fdd5bf  
+    module: zephyr
+    author: Franciszek Urbanski
+    email: franciszek.urbanski@nordicsemi.no
+    date: 2026-08-17
+  - path: arducam/0004-drivers-video-arducam-wake-camera-before-initializat.patch
+    sha256sum: ac0f1737d30a06a8a6a580f6e76a81c8f7d926d67a898db990736a7a75cd8ae1  
+    module: zephyr
+    author: Franciszek Urbanski
+    email: franciszek.urbanski@nordicsemi.no
+    date: 2026-08-17
+  - path: arducam/0005-drivers-video-arducam-validate-capture-completion-an.patch
+    sha256sum: 35670fe97343b308892af13a7cf77631816a38b7386dbdee233d44308ca94e4c  
+    module: zephyr
+    author: Franciszek Urbanski
+    email: franciszek.urbanski@nordicsemi.no
+    date: 2026-08-17
+  - path: arducam/0006-drivers-video-arducam-schedule-captures-at-the-reque.patch
+    sha256sum: 04516e6dc76eedafd6b2312709b48f38b99e5a3909bcb38c68dd0ca31fa81486  
+    module: zephyr
+    author: Franciszek Urbanski
+    email: franciszek.urbanski@nordicsemi.no
+    date: 2026-08-17

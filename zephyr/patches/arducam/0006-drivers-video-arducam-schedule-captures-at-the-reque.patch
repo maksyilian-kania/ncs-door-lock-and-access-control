@@ -1,0 +1,239 @@
+From 6ad379f3d2889c5aa142adbcd19d0aaa96ee0032 Mon Sep 17 00:00:00 2001
+From: Franciszek Urbanski <franciszek.urbanski@nordicsemi.no>
+Date: Mon, 17 Aug 2026 10:23:56 +0200
+Subject: [PATCH 6/6] drivers: video: arducam: schedule captures at the
+ requested interval
+
+Implement set_frmival() and replace periodic timer submissions with
+more flexible delayable work scheduled at the configured frame interval.
+Reschedule work when buffers arrive, cancel it synchronously on stream
+stop, and retain input buffers when capture or FIFO reads fail.
+---
+ drivers/video/video_arducam_mega.c | 117 +++++++++++++++++++++--------
+ 1 file changed, 84 insertions(+), 33 deletions(-)
+
+diff --git a/drivers/video/video_arducam_mega.c b/drivers/video/video_arducam_mega.c
+index a48fcbf8142b094344c7b4cdb6a6663db6bb02e1..0c6c1d6e92c827258be6e92f74733547c90eb2c5 100644
+--- a/drivers/video/video_arducam_mega.c
++++ b/drivers/video/video_arducam_mega.c
+@@ -202,7 +202,7 @@ enum mega_features {
+ #define AC_STACK_SIZE 4096
+ #define AC_PRIORITY   5
+ 
+-#define ARDUCAM_MEGA_CAPTURE_TRIES 200
++#define ARDUCAM_MEGA_CAPTURE_TRIES 500
+ 
+ K_THREAD_STACK_DEFINE(ac_stack_area, AC_STACK_SIZE);
+ 
+@@ -244,14 +244,16 @@ struct arducam_mega_data {
+ 	const struct device *dev;
+ 	struct k_fifo fifo_in;
+ 	struct k_fifo fifo_out;
+-	struct k_work buf_work;
+-	struct k_timer stream_schedule_timer;
++	struct k_work_delayable buf_work;
+ 	struct k_poll_signal *signal;
+ 	uint8_t fifo_first_read;
+ 	uint32_t fifo_length;
+ 	uint8_t stream_on;
+ 	uint32_t features;
+ 	uint32_t camera_id;
++	uint32_t frame_interval_ms;
++	uint32_t next_frame_at_ms;
++	uint32_t frame_timestamp_ms;
+ };
+ 
+ #define ARDUCAM_MEGA_VIDEO_FORMAT_CAP(width, height, format)                                       \
+@@ -899,29 +901,50 @@ static int arducam_mega_get_fmt(const struct device *dev, struct video_format *f
+ 	return 0;
+ }
+ 
+-static void arducam_mega_stream_schedule(struct k_timer *timer)
++static int arducam_mega_set_frmival(const struct device *dev, struct video_frmival *frmival)
+ {
+-	struct arducam_mega_data *drv_data = timer->user_data;
++	struct arducam_mega_data *drv_data = dev->data;
++	uint64_t interval_ms;
++
++	if (frmival->numerator == 0U || frmival->denominator == 0U) {
++		return -EINVAL;
++	}
++
++	interval_ms =
++		DIV_ROUND_UP((uint64_t)frmival->numerator * MSEC_PER_SEC, frmival->denominator);
+ 
+-	k_work_submit_to_queue(&ac_work_q, &drv_data->buf_work);
++	if (interval_ms == 0U) {
++		interval_ms = 1U;
++	}
++
++	drv_data->frame_interval_ms = interval_ms;
++
++	/* Report the effective interval after millisecond quantization. */
++	frmival->numerator = drv_data->frame_interval_ms;
++	frmival->denominator = MSEC_PER_SEC;
++
++	return 0;
+ }
+ 
+-static int arducam_mega_stream_start(const struct device *dev, bool enable,
+-				     enum video_buf_type type)
++static int arducam_mega_stream_start(const struct device *dev, bool enable, enum video_buf_type)
+ {
+ 	struct arducam_mega_data *drv_data = dev->data;
+ 
+-	if (drv_data->stream_on) {
+-		return 0;
+-	}
+-
+ 	if (enable) {
++		if (drv_data->stream_on) {
++			return 0;
++		}
++
+ 		drv_data->stream_on = 1;
+ 		drv_data->fifo_length = 0;
+-		k_timer_start(&drv_data->stream_schedule_timer, K_MSEC(30), K_MSEC(30));
++		drv_data->next_frame_at_ms = 0;
++
++		k_work_reschedule_for_queue(&ac_work_q, &drv_data->buf_work, K_NO_WAIT);
+ 	} else {
++		struct k_work_sync sync = {0};
++
+ 		drv_data->stream_on = 0;
+-		k_timer_stop(&drv_data->stream_schedule_timer);
++		k_work_cancel_delayable_sync(&drv_data->buf_work, &sync);
+ 	}
+ 
+ 	return 0;
+@@ -929,12 +952,7 @@ static int arducam_mega_stream_start(const struct device *dev, bool enable,
+ 
+ static int arducam_mega_stream_stop(const struct device *dev)
+ {
+-	struct arducam_mega_data *drv_data = dev->data;
+-
+-	drv_data->stream_on = 0;
+-
+-	k_timer_stop(&drv_data->stream_schedule_timer);
+-
++	arducam_mega_stream_start(dev, false, VIDEO_BUF_TYPE_OUTPUT);
+ 	return 0;
+ }
+ 
+@@ -1073,42 +1091,71 @@ static int arducam_mega_fifo_read(const struct device *dev, struct video_buffer
+ 
+ static void arducam_mega_buffer_work(struct k_work *work)
+ {
+-	struct k_work *dwork = work;
++	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+ 	struct arducam_mega_data *drv_data =
+ 		CONTAINER_OF(dwork, struct arducam_mega_data, buf_work);
+-	static uint32_t f_timestamp, f_length;
+ 	struct video_buffer *vbuf;
++	uint32_t now;
++	int32_t remaining_ms;
+ 	int ret = 0;
+ 
++	if (!drv_data->stream_on) {
++		return;
++	}
++
++	/* Check timing - reschedule if new frame not needed now */
++	if (drv_data->fifo_length == 0 && drv_data->next_frame_at_ms != 0) {
++		now = k_uptime_get_32();
++		remaining_ms = (int32_t)(drv_data->next_frame_at_ms - now);
++
++		if (remaining_ms > 0) {
++			k_work_reschedule_for_queue(&ac_work_q, &drv_data->buf_work,
++						    K_MSEC(remaining_ms));
++			return;
++		}
++	}
++
+ 	vbuf = k_fifo_get(&drv_data->fifo_in, K_NO_WAIT);
+ 	if (vbuf == NULL) {
+-		k_work_submit_to_queue(&ac_work_q, &drv_data->buf_work);
++		/* Buffer enqueue will restart */
+ 		return;
+ 	}
+ 
++	/* New capture - after timing check, if no buffer remains */
+ 	if (drv_data->fifo_length == 0) {
+-		ret = arducam_mega_capture(drv_data->dev, &f_length);
++		now = k_uptime_get_32();
++		ret = arducam_mega_capture(drv_data->dev);
+ 		if (ret < 0) {
+ 			LOG_ERR("Failed to capture frame (%d)", ret);
+ 			k_fifo_put(&drv_data->fifo_in, vbuf);
+ 			return;
+ 		}
+ 
+-		f_timestamp = k_uptime_get_32();
++		drv_data->frame_timestamp_ms = now;
++		drv_data->next_frame_at_ms = now + drv_data->frame_interval_ms;
+ 	}
+ 
++	/* Read FIFO into a single buffer */
+ 	ret = arducam_mega_fifo_read(drv_data->dev, vbuf);
+ 	if (ret < 0) {
+ 		LOG_ERR("failed to read a buffer (%d)", ret);
++		k_fifo_put(&drv_data->fifo_in, vbuf);
+ 		return;
+ 	}
++	vbuf->timestamp = drv_data->frame_timestamp_ms;
++	k_fifo_put(&drv_data->fifo_out, vbuf);
+ 
+-	if (drv_data->fifo_length != 0) {
+-		k_work_submit_to_queue(&ac_work_q, &drv_data->buf_work);
++	if (!drv_data->stream_on) {
++		return;
+ 	}
+ 
+-	vbuf->timestamp = f_timestamp;
+-	k_fifo_put(&drv_data->fifo_out, vbuf);
++	if (drv_data->fifo_length != 0) {
++		/* If FIFO hasn't been drained, continue reading into buffers */
++		k_work_reschedule_for_queue(&ac_work_q, &drv_data->buf_work, K_NO_WAIT);
++	} else if (!k_fifo_is_empty(&drv_data->fifo_in)) {
++		/* Another input buffer exists - run now, entry timing check will correct */
++		k_work_reschedule_for_queue(&ac_work_q, &drv_data->buf_work, K_NO_WAIT);
++	}
+ }
+ 
+ static int arducam_mega_enqueue(const struct device *dev, struct video_buffer *vbuf)
+@@ -1119,6 +1166,10 @@ static int arducam_mega_enqueue(const struct device *dev, struct video_buffer *v
+ 
+ 	LOG_DBG("enqueue buffer %p", vbuf->buffer);
+ 
++	if (data->stream_on) {
++		k_work_reschedule_for_queue(&ac_work_q, &data->buf_work, K_NO_WAIT);
++	}
++
+ 	return 0;
+ }
+ 
+@@ -1200,6 +1251,7 @@ static DEVICE_API(video, arducam_mega_driver_api) = {
+ 	.set_ctrl = arducam_mega_set_ctrl,
+ 	.get_caps = arducam_mega_get_caps,
+ 	.set_stream = arducam_mega_stream_start,
++	.set_frmival = arducam_mega_set_frmival,
+ 	.flush = arducam_mega_flush,
+ 	.enqueue = arducam_mega_enqueue,
+ 	.dequeue = arducam_mega_dequeue,
+@@ -1345,10 +1397,9 @@ static int arducam_mega_init(const struct device *dev)
+ 	k_work_queue_start(&ac_work_q, ac_stack_area, K_THREAD_STACK_SIZEOF(ac_stack_area),
+ 			   AC_PRIORITY, NULL);
+ 
+-	k_timer_init(&drv_data->stream_schedule_timer, arducam_mega_stream_schedule, NULL);
+-	drv_data->stream_schedule_timer.user_data = (void *)drv_data;
+-
+-	k_work_init(&drv_data->buf_work, arducam_mega_buffer_work);
++	drv_data->frame_interval_ms = 100;
++	drv_data->next_frame_at_ms = 0;
++	k_work_init_delayable(&drv_data->buf_work, arducam_mega_buffer_work);
+ 
+ 	ret = arducam_mega_soft_reset(dev);
+ 	if (ret < 0) {
+-- 
+2.43.0
+

@@ -1,0 +1,33 @@
+From 7ebf6f3930176e0fe9fa61e0496d01635e14a450 Mon Sep 17 00:00:00 2001
+From: Mario Paja <mariopaja@hotmail.com>
+Date: Wed, 27 May 2026 07:08:06 +0200
+Subject: [PATCH 2/6] drivers: video: arducam: fix  VIDEO_CID_FOCUS_AUTO
+ control range
+
+VIDEO_CID_FOCUS_AUTO is a boolean control type, so its range
+is max=1. The previous range of max=65535 was rejected
+by check_range() with -ERANGE, causing initialization to fail
+with "Unable to initialize controls" on AF-capable variants.
+
+Signed-off-by: Mario Paja <mariopaja@hotmail.com>
+(cherry picked from commit 29964767a7e1775c22d93a98e2f30681e22e32ef)
+---
+ drivers/video/video_arducam_mega.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/video/video_arducam_mega.c b/drivers/video/video_arducam_mega.c
+index b5518cd9c787f97c3a5aa18bf8ac410d3d78de78..cc2fbceb9fce4899b3ee7beed7f00533f1054d09 100644
+--- a/drivers/video/video_arducam_mega.c
++++ b/drivers/video/video_arducam_mega.c
+@@ -1242,7 +1242,7 @@ static int arducam_mega_init_controls(const struct device *dev)
+ 	if (drv_data->features & MEGA_HAS_FOCUS) {
+ 		ret = video_init_ctrl(
+ 			&ctrls->focus_auto, dev, VIDEO_CID_FOCUS_AUTO,
+-			(struct video_ctrl_range){.min = 0, .max = 65535, .step = 1, .def = 0});
++			(struct video_ctrl_range){.min = 0, .max = 1, .step = 1, .def = 0});
+ 		if (ret < 0) {
+ 			return ret;
+ 		}
+-- 
+2.43.0
+

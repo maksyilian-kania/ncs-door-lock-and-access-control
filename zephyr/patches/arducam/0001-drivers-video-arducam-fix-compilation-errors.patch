@@ -1,0 +1,58 @@
+From e9a2e876748591efd90e559cdf62065a16951d4d Mon Sep 17 00:00:00 2001
+From: Mario Paja <mariopaja@hotmail.com>
+Date: Thu, 21 May 2026 08:58:19 +0200
+Subject: [PATCH 1/6] drivers: video: arducam: fix compilation errors
+
+Fix compilation issues in the Arducam Mega video driver:
+
+- Fix incompatible pointer type when calling arducam_mega_await_bus_idle()
+  by aligning const-correctness of struct arducam_mega_bus.
+
+- Correct LOG_DBG format string mismatch in JPEG quality logging
+  (fix incorrect argument usage with %d).
+
+- Address deprecated SPI DT macro usage by updating initialization
+  to avoid deprecated delay parameter warning.
+
+Signed-off-by: Mario Paja <mariopaja@hotmail.com>
+(cherry picked from commit 827ee333e3bc4296e712f38df4a69f46cf197117)
+---
+ drivers/video/video_arducam_mega.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/video/video_arducam_mega.c b/drivers/video/video_arducam_mega.c
+index b7dc5499f1128d954dc38d0ad48c0a0be20e0e54..b5518cd9c787f97c3a5aa18bf8ac410d3d78de78 100644
+--- a/drivers/video/video_arducam_mega.c
++++ b/drivers/video/video_arducam_mega.c
+@@ -428,8 +428,8 @@ static int arducam_mega_await_bus_idle(const struct spi_dt_spec *spec, int tries
+ 	return 0;
+ }
+ 
+-static int arducam_mega_write_reg_wait(const struct arducam_mega_bus *bus, uint16_t reg,
+-				       uint8_t value, uint32_t idle_timeout_ms)
++static int arducam_mega_write_reg_wait(const struct spi_dt_spec *bus, uint16_t reg, uint8_t value,
++				       uint32_t idle_timeout_ms)
+ {
+ 	int ret = 0;
+ 
+@@ -581,7 +581,7 @@ static int arducam_mega_set_jpeg_quality(const struct device *dev, enum mega_ima
+ 	const struct arducam_mega_config *cfg = dev->config;
+ 	struct arducam_mega_data *drv_data = dev->data;
+ 
+-	LOG_DBG("JPEG quality level: %d", __func__, qc);
++	LOG_DBG("JPEG quality level: %d", qc);
+ 
+ 	if (drv_data->fmt.pixelformat != VIDEO_PIX_FMT_JPEG) {
+ 		LOG_ERR("Image format does not support setting JPEG quality");
+@@ -1353,7 +1353,7 @@ static int arducam_mega_init(const struct device *dev)
+ 	static const struct arducam_mega_config arducam_mega_cfg_##inst = {                        \
+ 		.bus = SPI_DT_SPEC_INST_GET(                                                       \
+ 			inst,                                                                      \
+-			SPI_OP_MODE_MASTER | SPI_WORD_SET(8) | SPI_LINES_SINGLE | SPI_LOCK_ON, 0), \
++			SPI_OP_MODE_MASTER | SPI_WORD_SET(8) | SPI_LINES_SINGLE | SPI_LOCK_ON),    \
+ 	};                                                                                         \
+                                                                                                    \
+ 	static struct arducam_mega_data arducam_mega_data_##inst;                                  \
+-- 
+2.43.0
+
