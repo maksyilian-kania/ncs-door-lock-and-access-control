@@ -12,5 +12,4 @@ zephyr_library_sources(src/gesture_access.cpp)
 
 zephyr_library_sources_ifdef(CONFIG_DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING src/frame_forwarding.cpp)
 
-add_subdirectory_ifdef(CONFIG_DOOR_LOCK_GESTURE_ACCESS_WORKQUEUE gesture_access_workqueue)
 add_subdirectory_ifdef(CONFIG_DOOR_LOCK_GESTURE_ACCESS_MODEL model)
