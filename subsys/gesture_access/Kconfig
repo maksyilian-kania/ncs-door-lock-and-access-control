@@ -24,14 +24,48 @@ source "$(ZEPHYR_BASE)/subsys/logging/Kconfig.template.log_config"
 config DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING
 	bool "Forward captured camera frames to a host PC over serial"
 	default n
+	select CRC
+	select USB_DEVICE_STACK_NEXT
+	select USBD_CDC_ACM_CLASS
+	select UART_INTERRUPT_DRIVEN
+	select UART_LINE_CTRL
 	help
 	  Build-time debug aid, off by default. When enabled, every captured
-	  frame plus its inference result is pushed over a serial connection
-	  to a host tool for visualization.
-	  See scripts/gesture_frame_viewer.py.
+	  frame plus its inference result is pushed over the SoC's native
+	  USB port (as a CDC ACM virtual COM port) to a host tool for
+	  visualization. See scripts/gesture_frame_viewer.py.
 
-	  Not intended for production builds: it adds a serial/USB channel
-	  and per-frame transmit overhead purely for debugging.
+	  Frames are only sent while a host has the port open (DTR
+	  asserted), so the application runs unchanged when nothing is
+	  connected. The console stays on its own UART (e.g. the onboard
+	  debugger's virtual COM port), so log output and frame data never
+	  share a channel.
+
+	  Not intended for production builds: it adds a USB channel and
+	  per-frame transmit overhead purely for debugging.
+
+if DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING
+
+config DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING_TX_TIMEOUT_MS
+	int "Per-frame USB transmit timeout in milliseconds"
+	default 500
+	help
+	  Upper bound on how long a single frame transfer may take. Sending
+	  is abandoned once this expires, which keeps capture and inference
+	  running if the host stops draining the port.
+
+config DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING_USB_VID
+	hex "USB vendor ID"
+	default 0x2fe3
+	help
+	  Defaults to the Zephyr project vendor ID, which is only licensed
+	  for development and testing.
+
+config DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING_USB_PID
+	hex "USB product ID"
+	default 0x0101
+
+endif # DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING
 
 rsource "gesture_access_workqueue/Kconfig"
 rsource "model/Kconfig"
