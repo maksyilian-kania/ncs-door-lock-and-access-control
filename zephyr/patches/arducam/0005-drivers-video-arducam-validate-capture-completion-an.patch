@@ -1,0 +1,128 @@
+From 58e33215da9d8ba0da266017cc28399f2ada62fc Mon Sep 17 00:00:00 2001
+From: Franciszek Urbanski <franciszek.urbanski@nordicsemi.no>
+Date: Fri, 14 Aug 2026 10:59:35 +0200
+Subject: [PATCH 5/6] drivers: video: arducam: validate capture completion and
+ FIFO data
+
+Flush the FIFO before each capture and propagate failures while
+starting or polling a capture. Reject timed-out, empty, and
+unexpectedly sized frames so invalid data is not delivered to video
+buffers. Return error codes to aid debugging.
+---
+ drivers/video/video_arducam_mega.c | 55 +++++++++++++++++++++++-------
+ 1 file changed, 43 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/video/video_arducam_mega.c b/drivers/video/video_arducam_mega.c
+index 1047d2ebc94e2a4df24011aefe2d5534b798e8f6..a48fcbf8142b094344c7b4cdb6a6663db6bb02e1 100644
+--- a/drivers/video/video_arducam_mega.c
++++ b/drivers/video/video_arducam_mega.c
+@@ -142,6 +142,8 @@ enum mega_features {
+ #define ARDUCHIP_FIFO   0x04 /* FIFO and I2C control */
+ #define ARDUCHIP_FIFO_2 0x07 /* FIFO and I2C control */
+ 
++#define FIFO_FLUSH 0x80
++
+ #define FIFO_CLEAR_ID_MASK 0x01
+ #define FIFO_START_MASK    0x02
+ 
+@@ -460,7 +462,7 @@ static int arducam_mega_await_bus_idle(const struct spi_dt_spec *spec, int tries
+ 		k_msleep(2);
+ 	}
+ 
+-	return 0;
++	return -ETIMEDOUT;
+ }
+ 
+ static int arducam_mega_write_reg_wait(const struct spi_dt_spec *bus, uint16_t reg, uint8_t value,
+@@ -972,30 +974,44 @@ static int arducam_mega_soft_reset(const struct device *dev)
+ 	return ret;
+ }
+ 
+-static int arducam_mega_capture(const struct device *dev, uint32_t *length)
++static int arducam_mega_capture(const struct device *dev)
+ {
+ 	const struct arducam_mega_config *cfg = dev->config;
+ 	struct arducam_mega_data *drv_data = dev->data;
+ 	int ret = 0;
++	bool capture_done = false;
+ 	uint32_t reg_data;
+ 
+-	arducam_mega_write_reg(&cfg->bus, ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
+-	arducam_mega_write_reg(&cfg->bus, ARDUCHIP_FIFO, FIFO_START_MASK);
+-
++	ret = arducam_mega_write_reg(&cfg->bus, ARDUCHIP_FIFO_2, FIFO_FLUSH);
++	if (ret < 0) {
++		LOG_ERR("Failed to flush the fifo (%d)", ret);
++		return ret;
++	}
++	ret = arducam_mega_write_reg(&cfg->bus, ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
++	if (ret < 0) {
++		LOG_ERR("Failed to clear the write memory completion flag (%d)", ret);
++		return ret;
++	}
++	ret = arducam_mega_write_reg(&cfg->bus, ARDUCHIP_FIFO, FIFO_START_MASK);
++	if (ret < 0) {
++		LOG_ERR("Failed to start the capture (%d)", ret);
++		return ret;
++	}
+ 	for (int tries = ARDUCAM_MEGA_CAPTURE_TRIES; tries > 0; tries--) {
+ 		ret = arducam_mega_read_reg(&cfg->bus, ARDUCHIP_TRIG, &reg_data);
+ 		if (ret < 0) {
+-			LOG_ERR("Capture timeout!");
+ 			return ret;
+ 		}
+-
+ 		if (reg_data & CAP_DONE_MASK) {
++			capture_done = true;
+ 			break;
+ 		}
+-
+ 		k_msleep(2);
+ 	}
+-
++	if (!capture_done) {
++		LOG_ERR("Camera capture timed out, trigger register value 0x%x", reg_data);
++		return -ETIMEDOUT;
++	}
+ 	ret = arducam_mega_read_reg(&cfg->bus, FIFO_SIZE1, &reg_data);
+ 	if (ret < 0) {
+ 		LOG_ERR("Failed to reset the fifo1 size (%d)", ret);
+@@ -1014,9 +1030,18 @@ static int arducam_mega_capture(const struct device *dev, uint32_t *length)
+ 		return ret;
+ 	}
+ 	drv_data->fifo_length |= reg_data << 16;
+-
++	if (drv_data->fifo_length == 0) {
++		LOG_ERR("Capture completed with an empty FIFO");
++		return -EIO;
++	}
++	if (drv_data->fmt.pixelformat != VIDEO_PIX_FMT_JPEG &&
++	    drv_data->fifo_length != drv_data->fmt.size) {
++		LOG_ERR("Unexpected FIFO size %u, expected %u", drv_data->fifo_length,
++			drv_data->fmt.size);
++		drv_data->fifo_length = 0;
++		return -EMSGSIZE;
++	}
+ 	drv_data->fifo_first_read = 1;
+-	*length = drv_data->fifo_length;
+ 	return 0;
+ }
+ 
+@@ -1062,7 +1087,13 @@ static void arducam_mega_buffer_work(struct k_work *work)
+ 	}
+ 
+ 	if (drv_data->fifo_length == 0) {
+-		arducam_mega_capture(drv_data->dev, &f_length);
++		ret = arducam_mega_capture(drv_data->dev, &f_length);
++		if (ret < 0) {
++			LOG_ERR("Failed to capture frame (%d)", ret);
++			k_fifo_put(&drv_data->fifo_in, vbuf);
++			return;
++		}
++
+ 		f_timestamp = k_uptime_get_32();
+ 	}
+ 
+-- 
+2.43.0
+

@@ -1,0 +1,38 @@
+From 9e5273ef1c4717d75f7397ae12a91ffbf479b142 Mon Sep 17 00:00:00 2001
+From: Franciszek Urbanski <franciszek.urbanski@nordicsemi.no>
+Date: Mon, 17 Aug 2026 10:02:37 +0200
+Subject: [PATCH 4/6] drivers: video: arducam: wake camera before
+ initialization
+
+Soft reset does not wake the camera from low-power mode, for correct
+initialization it is therefore necessary to perform the wake-up manually.
+This issue manifested itself when reinitializing the camera without cutting
+off power to it.
+---
+ drivers/video/video_arducam_mega.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/drivers/video/video_arducam_mega.c b/drivers/video/video_arducam_mega.c
+index 11001c4413657ca3f331c8d82134eda453f96e35..1047d2ebc94e2a4df24011aefe2d5534b798e8f6 100644
+--- a/drivers/video/video_arducam_mega.c
++++ b/drivers/video/video_arducam_mega.c
+@@ -1331,6 +1331,16 @@ static int arducam_mega_init(const struct device *dev)
+ 		return ret;
+ 	}
+ 
++	ret = arducam_mega_set_lowpower_enable(dev, false);
++	if (ret < 0) {
++		return ret;
++	}
++
++	ret = arducam_mega_await_bus_idle(&cfg->bus, 255);
++	if (ret < 0) {
++		return ret;
++	}
++
+ 	ret = arducam_mega_read_reg(&cfg->bus, CAM_REG_YEAR_SDK, &reg_data);
+ 	if (ret < 0) {
+ 		LOG_ERR("Failed to read year (%d)", ret);
+-- 
+2.43.0
+

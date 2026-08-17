@@ -1,0 +1,71 @@
+From 3a681a570192cf0c42ba20c726942a4f4c5ed38b Mon Sep 17 00:00:00 2001
+From: Franciszek Urbanski <franciszek.urbanski@nordicsemi.no>
+Date: Fri, 14 Aug 2026 10:50:14 +0200
+Subject: [PATCH 3/6] drivers: video: arducam: fix format to resolution mapping
+
+The previous resolution mapping logic was invalid, with the direct format
+index to resolution code conversion incompatible with the actual sensor
+resolution codes. The function `arducam_mega_get_resolution` performs the
+necessary conversion.
+---
+ drivers/video/video_arducam_mega.c | 37 +++++++++++++++++++++++++++++-
+ 1 file changed, 36 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/video/video_arducam_mega.c b/drivers/video/video_arducam_mega.c
+index cc2fbceb9fce4899b3ee7beed7f00533f1054d09..11001c4413657ca3f331c8d82134eda453f96e35 100644
+--- a/drivers/video/video_arducam_mega.c
++++ b/drivers/video/video_arducam_mega.c
+@@ -315,6 +315,41 @@ enum mega_resolution {
+ 
+ #define SUPPORT_RESOLUTION_NUM 9
+ 
++static inline enum mega_resolution arducam_mega_get_resolution(const struct device *dev,
++							       size_t fmt_idx)
++{
++	struct arducam_mega_data *drv_data = dev->data;
++	switch (fmt_idx % SUPPORT_RESOLUTION_NUM) {
++	case 0:
++		return MEGA_RESOLUTION_96X96;
++	case 1:
++		return MEGA_RESOLUTION_128X128;
++	case 2:
++		return MEGA_RESOLUTION_QVGA; /* 320x240 */
++	case 3:
++		return MEGA_RESOLUTION_320X320;
++	case 4:
++		return MEGA_RESOLUTION_VGA; /* 640x480 */
++	case 5:
++		return MEGA_RESOLUTION_HD; /* 1280x720 */
++	case 6:
++		return MEGA_RESOLUTION_UXGA; /* 1600x1200 */
++	case 7:
++		return MEGA_RESOLUTION_FHD; /* 1920x1080 */
++	case 8:
++		/* Depends on the sensor */
++		if (drv_data->camera_id == ARDUCAM_SENSOR_3MP_1 ||
++		    drv_data->camera_id == ARDUCAM_SENSOR_3MP_2) {
++			return MEGA_RESOLUTION_QXGA;
++		} else {
++			return MEGA_RESOLUTION_WQXGA2;
++		}
++		break;
++	default:
++		return -EINVAL;
++	}
++}
++
+ static int arducam_mega_write_reg(const struct spi_dt_spec *spec, uint8_t reg_addr, uint8_t value)
+ {
+ 	int ret = 0;
+@@ -845,7 +880,7 @@ static int arducam_mega_set_fmt(const struct device *dev, struct video_format *f
+ 		return ret;
+ 	}
+ 
+-	ret = arducam_mega_set_resolution(dev, i % SUPPORT_RESOLUTION_NUM);
++	ret = arducam_mega_set_resolution(dev, arducam_mega_get_resolution(dev, i));
+ 	if (ret < 0) {
+ 		return ret;
+ 	}
+-- 
+2.43.0
+
