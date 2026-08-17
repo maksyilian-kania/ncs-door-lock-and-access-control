@@ -7,7 +7,6 @@
 menuconfig DOOR_LOCK_GESTURE_ACCESS
 	bool "Door Lock gesture access (SPI camera + on-device inference)"
 	select CPP
-	select DOOR_LOCK_GESTURE_ACCESS_WORKQUEUE
 	select DOOR_LOCK_GESTURE_ACCESS_MODEL
 	help
 	  Enables gesture-based access control using an SPI camera and
@@ -67,7 +66,37 @@ config DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING_USB_PID
 
 endif # DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING
 
-rsource "gesture_access_workqueue/Kconfig"
+config DOOR_LOCK_GESTURE_ACCESS_THREAD_STACK_SIZE
+	int "Gesture access capture thread stack size"
+	default 4096
+	help
+	  Stack size for the dedicated gesture-access thread that owns the
+	  camera capture loop and on-device gesture inference.
+
+config DOOR_LOCK_GESTURE_ACCESS_THREAD_PRIORITY
+	int "Gesture access capture thread priority"
+	default 11
+	help
+	  Priority of the dedicated gesture-access capture thread. Left as a
+	  preemptible priority so it does not delay higher-priority
+	  Matter/BLE stack threads while it blocks on frame capture and runs
+	  inference.
+
+config DOOR_LOCK_GESTURE_ACCESS_DEBOUNCE_CONFIRM_FRAMES
+	int "Consecutive detecting frames required to confirm a gesture"
+	default 3
+	help
+	  Number of consecutive frames with at least one model detection
+	  required before the debounced detection state is reported as
+	  "detected". Filters out single-frame false positives.
+
+config DOOR_LOCK_GESTURE_ACCESS_DEBOUNCE_RELEASE_FRAMES
+	int "Consecutive non-detecting frames required to release a gesture"
+	default 2
+	help
+	  Number of consecutive frames with no model detection required
+	  before the debounced detection state falls back to "not detected".
+
 rsource "model/Kconfig"
 
 endif # DOOR_LOCK_GESTURE_ACCESS
