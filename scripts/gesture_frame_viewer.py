@@ -8,7 +8,21 @@
 Companion host-side tool for CONFIG_DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING
 (see subsys/gesture_access/src/frame_forwarding.{h,cpp}): every frame the
 board captures and runs inference on is pushed over the SoC's native USB port
-as a CDC ACM device, and shown here with the detection result drawn on top.
+as a CDC ACM device, and shown here with a marker drawn over every detected
+grid cell (FOMO can see multiple objects at once, so there may be more than
+one) plus the live confidence of the strongest cell - handy for picking
+CONFIG_DOOR_LOCK_GESTURE_ACCESS_MODEL's detection threshold, since the
+confidence number is reported every frame, not just when it clears the bar.
+
+Every above-threshold grid cell the device reports is drawn as a circle with
+its confidence, over a grid outline matching the model's output tensor. The
+device only forwards its raw per-frame result, not the debounced detection
+state it uses internally to decide when to actually unlock (see
+UpdateDebounce() in gesture_access.cpp) - so this viewer reimplements the
+same confirm/release consecutive-frame counting here, and shows the result
+as an OK/WAIT indicator, to mirror what the device would decide.
+
+Press 'q' or Escape to quit (or close the window).
 
 The frame resolution is carried in each frame header, so this works
 unmodified across capture sizes. Frames are single-channel grayscale.
@@ -211,6 +225,17 @@ class Frame:
     meta: dict = field(default_factory=dict)
 
 
+# Number of grid cells FOMO's output tensor has along each axis (see
+# kOutputWidth/kOutputHeight in gesture_access_model.cpp). The frame carries
+# its own pixel dimensions, so the cell size in pixels is derived per-frame.
+GRID_SIZE = 12
+
+MARKER_COLOR = (0, 255, 0)
+GRID_COLOR = (60, 60, 60)
+OK_COLOR = (0, 200, 0)
+WAIT_COLOR = (220, 20, 20)
+
+
 class Viewer:
     def __init__(self, args: argparse.Namespace, port_path: str):
         self.args = args
@@ -225,6 +250,14 @@ class Viewer:
         self.fps = 0.0
         self.photo: ImageTk.PhotoImage | None = None
 
+        # Host-side reimplementation of UpdateDebounce() in gesture_access.cpp:
+        # the device never forwards its debounced state, only the raw
+        # per-frame result, so this mirrors the same consecutive-frame
+        # confirm/release counting to approximate what the device decides.
+        self.confirm_count = 0
+        self.release_count = 0
+        self.confirmed = False
+
         self.root = tk.Tk()
         self.root.title(f"Gesture access frames ({port_path})")
         self.root.configure(background="black")
@@ -233,6 +266,8 @@ class Viewer:
         self.label.pack(padx=0, pady=0)
         self.root.protocol("WM_DELETE_WINDOW", self.quit)
         self.root.bind("<Escape>", lambda _event: self.quit())
+        self.root.bind("<KeyPress-q>", lambda _event: self.quit())
+        self.root.focus_set()
 
         if args.save_dir:
             Path(args.save_dir).mkdir(parents=True, exist_ok=True)
@@ -258,11 +293,77 @@ class Viewer:
 
     @staticmethod
     def describe(meta: dict) -> str:
-        boxes = meta.get("boxes") or []
-        if not boxes:
+        if "conf" not in meta:
+            return "no data"
+        conf = meta.get("conf", 0) / 1000.0
+        if not meta.get("det"):
             return "no gesture"
-        best = max(boxes, key=lambda box: box.get("value", 0.0))
-        return f"{best.get('label', '?')} {best.get('value', 0.0):.2f}"
+        return f"hand {conf:.2f}"
+
+    def update_debounce(self, detected: bool) -> None:
+        """Mirror gesture_access.cpp's UpdateDebounce() using the raw per-frame
+        `det` flag, since the device does not forward its own debounced
+        state."""
+        if detected:
+            self.release_count = 0
+            self.confirm_count += 1
+        else:
+            self.confirm_count = 0
+            self.release_count += 1
+
+        if not self.confirmed and self.confirm_count >= self.args.confirm_frames:
+            self.confirmed = True
+        elif self.confirmed and self.release_count >= self.args.release_frames:
+            self.confirmed = False
+
+    def draw_grid(self, draw: ImageDraw.ImageDraw, width: int, height: int) -> None:
+        for cell in range(1, GRID_SIZE):
+            x = cell * width // GRID_SIZE
+            draw.line((x, 0, x, height), fill=GRID_COLOR, width=1)
+        for cell in range(1, GRID_SIZE):
+            y = cell * height // GRID_SIZE
+            draw.line((0, y, width, y), fill=GRID_COLOR, width=1)
+
+    def draw_detections(self, draw: ImageDraw.ImageDraw, pts: list[dict], scale: int) -> None:
+        radius = 5 * scale
+        for pt in pts:
+            cx = pt.get("x", 0) * scale
+            cy = pt.get("y", 0) * scale
+            draw.ellipse(
+                (cx - radius, cy - radius, cx + radius, cy + radius),
+                outline=MARKER_COLOR,
+                width=2,
+            )
+            conf = pt.get("conf", 0) / 1000.0
+            draw.text((cx + radius + 2, cy - radius), f"{conf:.0%}", fill=MARKER_COLOR)
+
+    def draw_indicator(self, draw: ImageDraw.ImageDraw, width: int) -> None:
+        radius = 15
+        center = (width - radius - 12, radius + 12)
+        color = OK_COLOR if self.confirmed else WAIT_COLOR
+        draw.ellipse(
+            (center[0] - radius, center[1] - radius, center[0] + radius, center[1] + radius),
+            fill=color,
+            outline=(255, 255, 255),
+            width=2,
+        )
+        text = "OK" if self.confirmed else "WAIT"
+        draw.text((center[0] - radius, center[1] + radius + 4), text, fill=(255, 255, 255))
+
+    def draw_stats(self, draw: ImageDraw.ImageDraw, frame: Frame) -> None:
+        conf = frame.meta.get("conf", 0) / 1000.0
+        streak, required = (
+            (self.confirm_count, self.args.confirm_frames)
+            if not self.confirmed
+            else (self.release_count, self.args.release_frames)
+        )
+        lines = [
+            f"FPS: {self.fps:.1f}",
+            f"confidence: {conf:.0%}",
+            f"streak: {min(streak, required)}/{required}",
+        ]
+        for index, text in enumerate(lines):
+            draw.text((8, 6 + index * 16), text, fill=(255, 255, 0))
 
     def render(self, frame: Frame) -> Image.Image:
         image = Image.frombytes("L", (frame.width, frame.height), frame.pixels).convert("RGB")
@@ -272,16 +373,14 @@ class Viewer:
                 (frame.width * scale, frame.height * scale), Image.Resampling.NEAREST
             )
 
-        if not self.args.no_boxes:
-            draw = ImageDraw.Draw(image)
-            for box in frame.meta.get("boxes") or []:
-                x0 = box.get("x", 0) * scale
-                y0 = box.get("y", 0) * scale
-                x1 = x0 + box.get("w", 0) * scale
-                y1 = y0 + box.get("h", 0) * scale
-                draw.rectangle((x0, y0, x1, y1), outline=(0, 255, 0), width=2)
-                caption = f"{box.get('label', '?')} {box.get('value', 0.0):.2f}"
-                draw.text((x0 + 2, max(0, y0 - 12)), caption, fill=(0, 255, 0))
+        draw = ImageDraw.Draw(image)
+
+        if not self.args.no_marker:
+            self.draw_grid(draw, image.width, image.height)
+            self.draw_detections(draw, frame.meta.get("pts") or [], scale)
+
+        self.draw_indicator(draw, image.width)
+        self.draw_stats(draw, frame)
 
         return image
 
@@ -309,15 +408,17 @@ class Viewer:
                 self.fps = 0.7 * self.fps + 0.3 / elapsed if self.fps else 1.0 / elapsed
             self.last_shown = now
             self.count += 1
+            self.update_debounce(bool(frame.meta.get("det")))
 
             image = self.render(frame)
             self.photo = ImageTk.PhotoImage(image)
             self.label.configure(image=self.photo, text="")
 
             detection = self.describe(frame.meta)
+            status = "OK" if self.confirmed else "WAIT"
             self.root.title(
                 f"Gesture access {frame.width}x{frame.height} | "
-                f"{self.fps:4.1f} fps | {detection}"
+                f"{self.fps:4.1f} fps | {detection} | {status}"
                 + (f" | dropped {dropped}" if dropped else "")
             )
 
@@ -325,10 +426,9 @@ class Viewer:
                 self.save(image, frame)
 
             if not self.args.quiet:
-                infer = frame.meta.get("infer_ms")
-                seq = frame.meta.get("seq", self.count)
-                suffix = f" ({infer} ms)" if infer is not None else ""
-                print(f"#{seq}: {detection}{suffix}", flush=True)
+                infer_us = frame.meta.get("us")
+                suffix = f" ({infer_us / 1000.0:.1f} ms)" if infer_us is not None else ""
+                print(f"#{self.count}: {detection}{suffix}", flush=True)
 
         self.root.after(15, self.tick)
 
@@ -357,13 +457,32 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--scale", type=int, default=4, help="Integer upscaling factor for the window"
     )
-    parser.add_argument("--no-boxes", action="store_true", help="Do not draw detection boxes")
+    parser.add_argument(
+        "--no-marker", action="store_true", help="Do not draw the grid or detection markers"
+    )
     parser.add_argument("--save-dir", help="Also write every displayed frame here as a PNG")
     parser.add_argument("--quiet", action="store_true", help="Do not print a line per frame")
+    parser.add_argument(
+        "--confirm-frames",
+        type=int,
+        default=3,
+        help="Consecutive detecting frames before the OK/WAIT indicator confirms a gesture "
+        "(matches CONFIG_DOOR_LOCK_GESTURE_ACCESS_DEBOUNCE_CONFIRM_FRAMES's default)",
+    )
+    parser.add_argument(
+        "--release-frames",
+        type=int,
+        default=2,
+        help="Consecutive non-detecting frames before the OK/WAIT indicator releases a "
+        "confirmed gesture (matches CONFIG_DOOR_LOCK_GESTURE_ACCESS_DEBOUNCE_RELEASE_FRAMES's "
+        "default)",
+    )
     args = parser.parse_args()
 
     if args.scale < 1:
         parser.error("--scale must be at least 1")
+    if args.confirm_frames < 1 or args.release_frames < 1:
+        parser.error("--confirm-frames and --release-frames must be at least 1")
 
     return args
 
