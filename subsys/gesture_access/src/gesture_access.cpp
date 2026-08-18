@@ -128,16 +128,29 @@ int CaptureAndInferOneFrame()
 		return err;
 	}
 
-	UpdateDebounce(result.boxCount > 0);
+	UpdateDebounce(result.detected);
 
 #ifdef CONFIG_DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING
 	if (FrameForwarding::HostReady()) {
-		char meta[32];
-		int metaLength = snprintf(meta, sizeof(meta), "boxes=%zu,us=%u", result.boxCount,
-					   result.inferenceTimeUs);
+		char meta[256];
+		int offset = snprintf(meta, sizeof(meta), "{\"det\":%d,\"conf\":%u,\"us\":%u,\"pts\":[",
+				       result.detected, result.confidenceMilli, result.inferenceTimeUs);
 
-		FrameForwarding::Send(kFrameWidth, kFrameHeight, sGrayscaleFrame, meta,
-				      metaLength > 0 ? static_cast<size_t>(metaLength) : 0);
+		for (size_t i = 0; i < result.detectionCount && offset > 0 && (size_t)offset < sizeof(meta); i++) {
+			offset += snprintf(&meta[offset], sizeof(meta) - (size_t)offset,
+					    "%s{\"x\":%u,\"y\":%u,\"conf\":%u}", i ? "," : "",
+					    result.detections[i].x, result.detections[i].y,
+					    result.detections[i].confidenceMilli);
+		}
+
+		if (offset > 0 && (size_t)offset < sizeof(meta) - 2) {
+			offset += snprintf(&meta[offset], sizeof(meta) - (size_t)offset, "]}");
+		}
+
+		if (offset > 0 && (size_t)offset < sizeof(meta)) {
+			FrameForwarding::Send(kFrameWidth, kFrameHeight, sGrayscaleFrame, meta,
+					      static_cast<size_t>(offset));
+		}
 	}
 #endif // CONFIG_DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING
 
