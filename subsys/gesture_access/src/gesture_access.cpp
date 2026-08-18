@@ -175,7 +175,7 @@ void CaptureThreadFn(void *, void *, void *)
 }
 
 K_THREAD_DEFINE(sCaptureThread, CONFIG_DOOR_LOCK_GESTURE_ACCESS_THREAD_STACK_SIZE, CaptureThreadFn, NULL, NULL, NULL,
-		CONFIG_DOOR_LOCK_GESTURE_ACCESS_THREAD_PRIORITY, 0, 0);
+		CONFIG_DOOR_LOCK_GESTURE_ACCESS_THREAD_PRIORITY, 0, K_TICKS_FOREVER);
 
 } // namespace
 
@@ -228,6 +228,8 @@ int Init()
 		LOG_WRN("Frame forwarding unavailable (err %d)", err);
 	}
 #endif // CONFIG_DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING
+
+	k_thread_start(sCaptureThread);
 
 	return 0;
 }
