@@ -1,0 +1,10 @@
+sample:
+  description: Aliro NFC User Device
+  name: aliro-nfc-user-device
+  build_only: true
+tests:
+  build.aliro_nfc_user_device:
+    platform_allow:
+      - nrf54lm20dk/nrf54lm20b/cpuapp
+    integration_platforms:
+      - nrf54lm20dk/nrf54lm20b/cpuapp
