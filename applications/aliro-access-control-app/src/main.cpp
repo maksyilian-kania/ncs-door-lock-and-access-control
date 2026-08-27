@@ -31,10 +31,6 @@
 #include <aliro/aliro.h>
 #endif // CONFIG_DOOR_LOCK_BLE_UWB
 
-#ifdef CONFIG_DOOR_LOCK_GESTURE_ACCESS
-#include <gesture_access/gesture_access.h>
-#endif // CONFIG_DOOR_LOCK_GESTURE_ACCESS
-
 LOG_MODULE_REGISTER(door_lock_app, CONFIG_DOOR_LOCK_APP_LOG_LEVEL);
 
 namespace {
@@ -170,15 +166,6 @@ int main()
 	VerifyOrDie(nusErr == 0, "Failed to start NUS service");
 
 #endif // CONFIG_DOOR_LOCK_NUS_SERVICE
-
-#ifdef CONFIG_DOOR_LOCK_GESTURE_ACCESS
-	LOG_INF("Initializing gesture access");
-	int gestureAccessErr = DoorLock::GestureAccess::Init();
-	VerifyOrDie(gestureAccessErr == 0, "Failed to initialize gesture access");
-	gestureAccessErr = DoorLock::GestureAccess::Start();
-	VerifyOrDie(gestureAccessErr == 0, "Failed to start gesture access");
-
-#endif // CONFIG_DOOR_LOCK_GESTURE_ACCESS
 
 	LOG_INF("Application started");
 

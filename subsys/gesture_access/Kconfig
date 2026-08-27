@@ -81,6 +81,7 @@ config DOOR_LOCK_GESTURE_ACCESS_THREAD_PRIORITY
 
 config DOOR_LOCK_GESTURE_ACCESS_DEBOUNCE_CONFIRM_FRAMES
 	int "Consecutive detecting frames required to confirm a gesture"
+	range 1 255
 	default 3
 	help
 	  Number of consecutive frames with at least one model detection
@@ -89,6 +90,7 @@ config DOOR_LOCK_GESTURE_ACCESS_DEBOUNCE_CONFIRM_FRAMES
 
 config DOOR_LOCK_GESTURE_ACCESS_DEBOUNCE_RELEASE_FRAMES
 	int "Consecutive non-detecting frames required to release a gesture"
+	range 1 255
 	default 2
 	help
 	  Number of consecutive frames with no model detection required

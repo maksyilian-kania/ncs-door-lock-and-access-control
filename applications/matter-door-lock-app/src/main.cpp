@@ -8,10 +8,6 @@
 
 #include <zephyr/logging/log.h>
 
-#ifdef CONFIG_DOOR_LOCK_GESTURE_ACCESS
-#include <gesture_access/gesture_access.h>
-#endif // CONFIG_DOOR_LOCK_GESTURE_ACCESS
-
 LOG_MODULE_REGISTER(app, CONFIG_CHIP_APP_LOG_LEVEL);
 
 int main()

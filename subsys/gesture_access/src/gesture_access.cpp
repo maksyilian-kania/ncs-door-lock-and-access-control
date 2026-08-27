@@ -34,6 +34,7 @@ namespace {
 
 constexpr uint16_t kFrameWidth = Model::kInputWidth;
 constexpr uint16_t kFrameHeight = Model::kInputHeight;
+constexpr size_t kVideoChunkBytes = 512; //kFrameWidth * 2 * kVideoChunkRows;
 constexpr size_t kVideoBufferCount = CONFIG_VIDEO_BUFFER_POOL_NUM_MAX;
 constexpr size_t kMaxDetectionCallbacks = 4;
 
@@ -218,7 +219,7 @@ int Init()
 	}
 
 	for (size_t i = 0; i < kVideoBufferCount; i++) {
-		video_buffer *vbuf = video_buffer_alloc(kFrameWidth * kFrameHeight * 2, K_NO_WAIT);
+		video_buffer *vbuf = video_buffer_alloc(kVideoChunkBytes, K_NO_WAIT);
 
 		if (vbuf == nullptr) {
 			LOG_ERR("Failed to allocate video buffer %zu", i);
