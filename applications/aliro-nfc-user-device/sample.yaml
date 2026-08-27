@@ -1,6 +1,7 @@
 sample:
   description: Aliro NFC User Device
   name: aliro-nfc-user-device
+common:
   build_only: true
 tests:
   build.aliro_nfc_user_device:

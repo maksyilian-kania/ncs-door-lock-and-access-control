@@ -1,0 +1,9 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+# NFC-A Type 4 Tag/ISO-DEP listen transport: connects nfc_t4t_lib to the
+# Aliro::UserDeviceStack session/command-APDU facade through a bounded queue
+# and dedicated NFC/stack thread. Implemented starting with AWP1.
