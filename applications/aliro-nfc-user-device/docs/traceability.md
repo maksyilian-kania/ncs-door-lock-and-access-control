@@ -16,15 +16,23 @@ used to resolve ambiguity, and one status:
   named in `docs/evidence.md`.
 
 Created in AWP0 per `APP_PLAN.md` §1; updated in every subsequent AWP. AWP0
-implements no protocol requirement — it replaces the POC skeleton, enables
-the checked-out User Device stack, and creates the module layout later AWPs
-fill in. Every row below is therefore `not-yet-verifiable` except the build
-evidence recorded for `-001`.
+implemented no protocol requirement — it replaced the POC skeleton, enabled
+the checked-out User Device stack, and created the module layout later AWPs
+fill in.
+
+AWP1 implements `platform/nfc` (bounded queue + dedicated NFC/stack worker
+thread, ISO-DEP fragment reassembly, `Interface::UserDevice::Nfc`) and
+`platform/os` (mutex, timer, deferred-event queue, trusted-time,
+role-neutral `Interface::Logging` bridge). Per `APP_PLAN.md` AWP1 scope,
+this covers the *application transport* portions of `-001`/`-002`; `-013`
+and `-014` remain stack-owned but are now exercisable end-to-end through
+this transport (see the AWP0 status legend above). Every other row is
+unchanged from AWP0 (`not-yet-verifiable`).
 
 | ID | Requirement (summary) | App files (this AWP) | Stack ownership | Tests | DK evidence | Normative citation | Status |
 |---|---|---|---|---|---|---|---|
-| ALIRO-UD-SYRS-P1-001 | Execute on nRF54LM20B DK + PCA64110 antenna. | `CMakeLists.txt`, `prj.conf`, `src/main.cpp` | — | `build.aliro_nfc_user_device` (twister, DK target build) | DK build passing (see `docs/evidence.md`); board flash/antenna demonstration not yet performed | NORDIC-DK; project constraint | not-yet-verifiable (build evidence only) |
-| ALIRO-UD-SYRS-P1-002 | Operate as NFC-A Type 4 Tag Platform / ISO-DEP listen mode. | `src/platform/nfc` (skeleton only; no transport code yet) | SELECT/ISO-DEP session behavior | — | — | ALIRO-SPEC §10.1, p.93; NORDIC-NFC | not-yet-verifiable |
+| ALIRO-UD-SYRS-P1-001 | Execute on nRF54LM20B DK + PCA64110 antenna. | `CMakeLists.txt`, `prj.conf`, `src/main.cpp`, `src/platform/nfc`, `src/platform/os` | — | `build.aliro_nfc_user_device` (twister, DK target build) | Flashed to a physical nRF54LM20 DK (serial 1051885995) and booted; console log shows stack init and NFC T4T listen mode start (see `docs/evidence.md`) | NORDIC-DK; project constraint | verified-end-to-end |
+| ALIRO-UD-SYRS-P1-002 | Operate as NFC-A Type 4 Tag Platform / ISO-DEP listen mode. | `src/platform/nfc/nfc_transport.{h,cpp}`, `nfc_worker.{h,cpp}`, `apdu_fragment_assembler.{h,cpp}` | SELECT/ISO-DEP session behavior | `apdu_fragment_assembler` (fragment assembly/overflow/reset, host), `worker_lifecycle` (field on/off, duplicate/stale events, field-loss race, queue overflow, host, real stack) | NFC T4T listen mode confirmed started on DK console log (see `docs/evidence.md`); no physical reader/antenna tap performed yet | ALIRO-SPEC §10.1, p.93; NORDIC-NFC | app-implemented |
 | ALIRO-UD-SYRS-P1-003 | Line-oriented CLI over DK virtual UART, 115200 8N1. | `src/cli` (skeleton only) | — | — | — | Project constraint; NORDIC-DK | not-yet-verifiable |
 | ALIRO-UD-SYRS-P1-004 | CLI provisions Access Credential (key, bindings, trust, policy, timestamps, mailbox config, optional documents). | `src/storage/credential`, `src/cli` (skeletons only) | — | — | — | ALIRO-SPEC §§6.2, 8.3.1.14–15 | not-yet-verifiable |
 | ALIRO-UD-SYRS-P1-005 | CLI create/update/inspect/delete/factory-reset with deterministic results. | `src/storage/credential`, `src/cli` (skeletons only) | — | — | — | Project constraint | not-yet-verifiable |
@@ -35,9 +43,9 @@ evidence recorded for `-001`.
 | ALIRO-UD-SYRS-P1-010 | CLI method to select among multiple matching Access Credentials. | `src/storage/credential`, `src/cli` (skeletons only) | `Trust::GetReaderPublicKey/GetReaderIssuerPublicKey` binding-awareness (see AWP3 blocker note) | — | — | ALIRO-SPEC §6.2; ALIRO-TP Table 4-3 | not-yet-verifiable |
 | ALIRO-UD-SYRS-P1-011 | DK button press = user authentication for a configurable 1–300 s window (default 30 s). | `src/platform/authorization` (skeleton only) | — | — | — | Project architecture; ALIRO-SPEC §8.3.1.14 | not-yet-verifiable |
 | ALIRO-UD-SYRS-P1-012 | Visible indication when authentication is required and no valid window exists. | `src/platform/authorization` (skeleton only) | — | — | — | ALIRO-SPEC §8.3.1.14 | not-yet-verifiable |
-| ALIRO-UD-SYRS-P1-013 | SELECT of AID `A000000909ACCE5501` returns conforming FCI (type `0x0000`, version `0x0100`, ≤256 bytes). | — | FCI/SELECT response encoding | — | — | ALIRO-SPEC §10.2.1.2 | not-yet-verifiable |
+| ALIRO-UD-SYRS-P1-013 | SELECT of AID `A000000909ACCE5501` returns conforming FCI (type `0x0000`, version `0x0100`, ≤256 bytes). | `src/platform/nfc` (transport wiring only; FCI bytes are stack-owned) | FCI/SELECT response encoding | `worker_lifecycle::test_select_expedited_aid_returns_spec_fci` (exact FCI bytes from the Aliro spec worked example, through the real worker + real stack, host) | Not yet exercised with a physical reader/antenna tap | ALIRO-SPEC §10.2.1.2 | verified-end-to-end (host); DK antenna tap pending |
 | ALIRO-UD-SYRS-P1-014 | Encode expedited commands/responses as ISO/IEC 7816-4 APDUs per Aliro CLA/INS/P1/P2/Lc/Le/status words/TLV/endianness. | — | APDU/TLV encoding | — | — | ALIRO-SPEC §8.3.2.1 | not-yet-verifiable |
-| ALIRO-UD-SYRS-P1-015 | Support command chaining for AUTH0 responses and LOAD CERT/AUTH1/EXCHANGE. | `src/platform/nfc` (skeleton only; fragment assembly lands in AWP1) | Chaining state machine | — | — | ALIRO-SPEC §8.3.2.2; ALIRO-TP Table 4-3 | not-yet-verifiable |
+| ALIRO-UD-SYRS-P1-015 | Support command chaining for AUTH0 responses and LOAD CERT/AUTH1/EXCHANGE. | `src/platform/nfc/apdu_fragment_assembler.{h,cpp}` (raw ISO-DEP fragment reassembly only; Aliro-level command chaining is stack-owned) | Chaining state machine | `apdu_fragment_assembler::test_chained_fragments_assemble_in_order` and related cases (host) | — | ALIRO-SPEC §8.3.2.2; ALIRO-TP Table 4-3 | app-implemented (transport-level reassembly only) |
 | ALIRO-UD-SYRS-P1-016 | Accept unknown extension TLVs where forward-compatible processing is required. | — | TLV parsing | — | — | ALIRO-SPEC §§8.3.3.2, 8.3.3.4, 10.2.1.2 | not-yet-verifiable |
 | ALIRO-UD-SYRS-P1-017 | Support complete Expedited Standard flow: SELECT, AUTH0, optional LOAD CERT, AUTH1, EXCHANGE\*, result handling. | — | Session/Access Protocol state machine | — | — | ALIRO-SPEC §§8.1.1.1, 8.2 | not-yet-verifiable |
 | ALIRO-UD-SYRS-P1-018 | Generate new random P-256 ephemeral Access Credential key pair per AUTH0 response. | `src/platform/crypto` (skeleton only) | AUTH0 response orchestration | — | — | ALIRO-SPEC §§8.3.3.2.6–7 | not-yet-verifiable |

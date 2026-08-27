@@ -160,3 +160,257 @@ fork and an unpinned branch is a repository/process decision outside this
 AWP's scope — ask the user whether/how `west-aliro.yml` should be updated
 (e.g. pin `ncs-aliro`'s canonical location and an immutable revision) before
 relying on a from-scratch checkout.
+
+Per explicit user instruction, `docs/Requirements.pdf` and any modified
+version of `west-aliro.yml` must never be committed by any AWP; both remain
+untracked/unstaged in every commit made so far.
+
+## AWP1 — NFC transport, OS bridge, and stack lifecycle
+
+### Baseline
+
+- `ncs-aliro` checked-out revision unchanged from AWP0:
+  `b8bed857b482d288168185e76d5452469739fbdd` (`user_device: WP3: add APDU
+  responder, SELECT codec, and minimal HSM`). No `west update` was run.
+
+### Public contract inspected
+
+- `include/aliro/user_device/interface.h` — `Aliro::Interface::UserDevice::Nfc`
+  (`SendResponseApdu()`, `HandleTermination()`, `GetTimingConstraints()`) and
+  `Aliro::Interface::UserDevice::Os` (`QueueEvent()`, `Mutex::Lock/Unlock()`,
+  `Timer::Acquire/Release/Start/Stop/IsRunning()`, `GetTrustedTimestamp()`).
+- `stack/src/user_device/session_manager.{h,cpp}` — `UserDeviceSessionManager`
+  (`kMaxSessions = 1` for P1 NFC-only PICS); `Destroy()` unconditionally calls
+  `Interface::UserDevice::Nfc::HandleTermination()`, including for stale/
+  duplicate deactivation (documented as a safe no-op when no session exists).
+- `stack/src/user_device/session.{h,cpp}` — `UserDeviceSession::HandleCommandApdu()`
+  calls `Interface::UserDevice::Nfc::SendResponseApdu()` synchronously, on
+  whatever thread called it in; the session watchdog uses
+  `Interface::UserDevice::Os::Timer` and defers its expiry through
+  `EventHandler::PostEvent()` → `Interface::UserDevice::Os::QueueEvent()`
+  (safe to call from ISR/timer context — never touches the stack directly).
+- `stack/src/user_device/event_handler.{h,cpp}` — confirms every deferred
+  User Device stack event is a `QueueEvent()`-posted opaque pointer, later
+  passed unchanged to `UserDeviceStack::ProcessEvent()`.
+- `stack/src/user_device/nfc/{command_apdu,apdu_responder}.{h,cpp}`,
+  `stack/src/user_device/hsm/state_machine.{h,cpp}`,
+  `stack/src/user_device/access_protocol/select_response_encoder.{h,cpp}` —
+  confirms the checked-out stack (WP3) already implements Aliro SELECT for
+  the Expedited Phase AID end to end, which is why this AWP's tests verify a
+  real SELECT response against the spec (see "Deliverables completed" and
+  "Commands run" below) instead of only build/link evidence.
+- `tests/user_device/dut_adapter/{fake_nfc,fake_timer,fake_queue}.cpp` and
+  `tests/user_device/lifecycle/src/test_select.cpp` — the stack's own host
+  DUT-adapter fakes and SELECT test; used only as a *reference* for the
+  `Interface::UserDevice::Nfc`/`Os` call contract and for the exact
+  known-good SELECT command/FCI-response bytes (Aliro 1.0 Specification and
+  Test Plan, 26-42802-001, Table 10-3 and §10.2.1.2/Appendix 14.4, page
+  96/177), reused verbatim in this AWP's `worker_lifecycle` test. No
+  `ncs-aliro` test file was copied or modified.
+- `stack/src/aliro/log.h` / `stack/src/user_device/log.h` — both roles'
+  `ALIRO_LOG_*`/`ALIRO_UD_LOG_*` macros call
+  `Aliro::Interface::Logging::Log()`/`LogHexdump()` unconditionally (declared
+  in a private stack header, not gated on any Kconfig). See "External stack
+  observations" below: this is a role-neutral platform contract the
+  application must implement, not previously needed because AWP0 exercised
+  no code path in `stack/src/user_device/*` that logs.
+
+### Deliverables completed
+
+- `src/platform/nfc/nfc_worker.{h,cpp}` — the bounded queue
+  (`CONFIG_ALIRO_UD_NFC_EVENT_QUEUE_DEPTH`, default 4) and dedicated
+  high-priority thread (`CONFIG_ALIRO_UD_NFC_THREAD_PRIORITY`, default
+  `K_PRIO_PREEMPT(5)`) required by `APP_PLAN.md` AWP1. Each queue entry is a
+  small, self-contained `WorkerEvent` (kind + optional opaque stack-event
+  pointer + an embedded, per-entry command-APDU copy), so a lagging worker
+  with several events already queued can never corrupt or race a shared
+  buffer. `PostFieldOn()`/`PostFieldOff()`/`PostCommandApdu()`/
+  `PostStackEvent()` are the only entry points; all four use `k_msgq_put()`
+  with `K_NO_WAIT` (never blocks, safe from ISR/timer context) and return a
+  non-zero error when the queue is full, which the caller logs and drops —
+  queue overflow, stale events, and duplicate field events are handled by
+  dropping/absorbing rather than blocking or corrupting state (see "Commands
+  run" below for the test that exercises this).
+- `src/platform/nfc/apdu_fragment_assembler.{h,cpp}` — the raw ISO-DEP
+  fragment-reassembly state machine (`Incomplete`/`Complete`/`Overflow`),
+  factored out of the `nfc_t4t_lib` glue specifically so it can be unit
+  tested on `native_sim/native/64` without any NFC hardware dependency
+  (`nrfxlib`'s NFC library only ships prebuilt Cortex-M archives, so
+  `nfc_transport.cpp` itself cannot build for `native_sim`). Overflow resets
+  the assembler and is reported back to the caller (`nfc_transport.cpp`),
+  which responds with the transport-layer framing status `6F00` directly —
+  not through the stack — keeping `platform/nfc` free of Aliro APDU/TLV
+  parsing per `APP_PLAN.md`.
+- `src/platform/nfc/nfc_transport.{h,cpp}` — the `nfc_t4t_lib` glue:
+  `NfcCallback()` only copies fragments (via `ApduFragmentAssembler`) and
+  posts events to the worker (`PostFieldOn/PostFieldOff/PostCommandApdu`);
+  it never calls `Aliro::UserDeviceStack` or any stack/storage/crypto
+  operation directly. Implements
+  `Aliro::Interface::UserDevice::Nfc::SendResponseApdu()` (copies into a
+  dedicated transmit buffer retained unchanged until the next
+  `nfc_t4t_lib` callback, then calls `nfc_t4t_response_pdu_send()`),
+  `HandleTermination()` (resets fragment-assembly state), and
+  `GetTimingConstraints()` (returns the default/unconstrained value; the
+  exact ALIRO-TP response-time bounds are added in AWP7).
+- `src/platform/os/os_mutex.cpp`, `os_timer.cpp`, `os_queue.cpp`,
+  `os_trusted_time.cpp` — `Aliro::Interface::UserDevice::Os` implemented
+  with Zephyr primitives: `Mutex::Lock/Unlock()` on a `k_mutex` (already
+  reentrant for its owning thread); `Timer::*` on a fixed pool of
+  `CONFIG_ALIRO_UD_OS_MAX_TIMERS` (default 4) `k_timer`s, whose ISR-context
+  expiry handler only forwards to the stack-supplied callback (itself always
+  ISR-safe today — it only calls `QueueEvent()`); `QueueEvent()` forwards to
+  `AliroUd::Nfc::PostStackEvent()`, so every deferred stack event and every
+  NFC transport event is serialized through `UserDeviceStack` calls on the
+  *same* worker thread, per `APP_PLAN.md` AWP1 ("Route stack-queued events
+  back only to `UserDeviceStack::ProcessEvent()` on the dedicated thread.");
+  `GetTrustedTimestamp()` returns `std::nullopt` (no trusted wall clock on
+  this platform for P1).
+- `src/platform/os/os_logging.cpp` — implements
+  `Aliro::Interface::Logging::Log()`/`LogHexdump()`, discovered to be a
+  required link-time dependency once any `ALIRO_UD_LOG_*` call site is
+  reachable (see "External stack observations" below); gated on
+  `CONFIG_NCS_ALIRO_USER_DEVICE_LOG_LEVEL_VALUE`, independently of the
+  Reader-scoped equivalent shipped for `aliro-access-control-app`
+  (`subsys/aliro/interface_impl/log`, gated on `NCS_ALIRO`/unusable here).
+- `src/main.cpp` — after stack `Init()`, calls `AliroUd::Nfc::Start()`
+  (starts the worker thread, then `nfc_t4t_setup()` +
+  `nfc_t4t_emulation_start()`).
+- `prj.conf` — added `CONFIG_NFC_T4T_NRFXLIB=y` (raw ISO-DEP transport, no
+  NDEF payload).
+- `Kconfig` (application root) and `src/platform/{Kconfig,nfc/Kconfig,os/Kconfig}` —
+  added, following the same `rsource` convention as
+  `aliro-access-control-app`; expose
+  `CONFIG_ALIRO_UD_NFC_THREAD_STACK_SIZE/_PRIORITY/_EVENT_QUEUE_DEPTH` and
+  `CONFIG_ALIRO_UD_OS_MAX_TIMERS`, plus per-module `LOG_LEVEL` choices via the
+  standard `module =`/`module-str =`/`source "$(ZEPHYR_BASE)/subsys/logging/Kconfig.template.log_config"`
+  pattern.
+- `tests/functional/subsys/aliro_nfc_user_device/apdu_fragment_assembler/` —
+  new host test, no stack dependency: single/chained/zero-length-final
+  fragments, single-fragment and cumulative-fragment overflow, recovery
+  after overflow, and `Reset()` discarding a stale partial assembly (7 test
+  cases).
+- `tests/functional/subsys/aliro_nfc_user_device/worker_lifecycle/` — new
+  host test: builds the *real* `nfc_worker.cpp` + `platform/os/*.cpp` +
+  `Aliro::UserDeviceStack` (not fakes), substituting a small
+  `fake_nfc_interface.cpp` test double only for
+  `Aliro::Interface::UserDevice::Nfc` (the hardware-dependent
+  `nfc_transport.cpp` is excluded, since `nrfxlib`'s NFC library does not
+  build for `native_sim`). Covers: field-on → command → exactly one
+  response (NFC-to-stack call ordering); the Expedited Phase SELECT command
+  returns the exact spec FCI bytes (reused from
+  `tests/user_device/lifecycle/src/test_select.cpp`); field-off →
+  `HandleTermination()`; duplicate field-on; field-off with no session
+  (stale/duplicate deactivation); a field-loss/re-activation race; and
+  bounded-queue overflow (posting more events than
+  `CONFIG_ALIRO_UD_NFC_EVENT_QUEUE_DEPTH` without letting the worker drain,
+  relying on the test thread's higher scheduling priority than the worker
+  for determinism) followed by a recovery check (7 test cases).
+- `docs/traceability.md` — updated `-001` to `verified-end-to-end` (DK flash,
+  see below), `-002` to `app-implemented` (transport portion), `-013` to
+  `verified-end-to-end (host)` (SELECT FCI bytes match spec through the real
+  worker + real stack), `-015` to `app-implemented (transport-level
+  reassembly only)`; every other row unchanged.
+
+### Commands run and results
+
+Toolchain invoked via `ncs4`, from `/home/mak5-local/gesture-access` (west
+topdir).
+
+1. `west build -b nrf54lm20dk/nrf54lm20b/cpuapp -d build_awp1_dk applications/aliro-nfc-user-device --pristine`
+   — **Result: pass.** FLASH 55968 B (2.68%), RAM 19128 B (3.66%).
+2. `west twister -T tests/functional/subsys/aliro_nfc_user_device/apdu_fragment_assembler -p native_sim/native/64`
+   — **Result: pass.** 7/7 test cases passed.
+3. `west twister -T tests/functional/subsys/aliro_nfc_user_device/worker_lifecycle -p native_sim/native/64`
+   — **Result: pass.** 7/7 test cases passed.
+4. `west twister -T tests/functional/subsys/aliro_nfc_user_device -T applications/aliro-nfc-user-device -p native_sim/native/64 -p nrf54lm20dk/nrf54lm20b/cpuapp`
+   — **Result: pass.** 3 of 4 test configurations executed and passed
+   (`host_smoke`, `apdu_fragment_assembler`, `worker_lifecycle`; 15/15 test
+   cases), 1 built-only (`build.aliro_nfc_user_device`, DK target, no
+   hardware runner configured in Twister).
+5. `west flash -d build_awp1_dk` — flashed the AWP1 build to a physical
+   nRF54LM20 DK connected to this environment (`nrfutil device list` →
+   serial `1051885995`, board `PCA10184`). **Result: pass**
+   ("Board(s) with serial number(s) 1051885995 flashed successfully.").
+6. Captured the DK's console UART (`/dev/ttyACM1`, 115200 8N1) across a
+   device reset:
+
+   ```
+   *** Booting nRF Connect SDK v3.4.0-99553055607b ***
+   *** Using Zephyr OS v4.4.0-bf801e4e3d19 ***
+   [00:03:50.051,170] <inf> aliro_nfc_ud: Aliro NFC User Device
+   [00:03:50.057,243] <inf> aliro_nfc_ud: User Device stack initialized
+   [00:03:50.064,063] <inf> aliro_ud_nfc: NFC T4T listen mode started (raw ISO-DEP)
+   ```
+
+   **Result: pass.** Confirms, on physical hardware: the stack initializes,
+   `AliroUd::Nfc::Start()` succeeds, and `nfc_t4t_setup()` +
+   `nfc_t4t_emulation_start()` both return `0`. No physical Aliro
+   reader/PCA64110 antenna tap was performed in this invocation (no reader
+   hardware available); `-002`/`-013` are marked `verified-end-to-end (host)`
+   pending that hardware step, not a full field test.
+
+### Verification-method mapping (SyRS codes: T/D/I/A)
+
+- `ALIRO-UD-SYRS-P1-001` — **D**: physical DK flash-and-boot demonstration
+  (step 5–6 above) supersedes AWP0's build-only evidence. Updated to
+  `verified-end-to-end` in `docs/traceability.md`.
+- `ALIRO-UD-SYRS-P1-002` — **T**/partial **D**: the application-owned NFC-A
+  Type 4 Tag/ISO-DEP listen-mode transport (fragment assembly, queue,
+  worker thread, session lifecycle mapping) is implemented and host-tested
+  (`worker_lifecycle`), and confirmed starting on the physical DK (step 6).
+  The stack-owned SELECT/ISO-DEP session behavior itself is WP3's, already
+  covered by `ncs-aliro`'s own tests; not duplicated here beyond the
+  end-to-end SELECT check below. Updated to `app-implemented`.
+- `ALIRO-UD-SYRS-P1-013` — **T**: `worker_lifecycle::test_select_expedited_aid_returns_spec_fci`
+  sends the Expedited Phase AID SELECT through the real worker thread and
+  real stack and asserts the exact FCI bytes from the spec's worked example
+  (Aliro 1.0 Specification and Test Plan, 26-42802-001, §10.2.1.2, Appendix
+  14.4, page 177). Updated to `verified-end-to-end (host)`; a physical
+  reader/antenna tap is still pending.
+- `ALIRO-UD-SYRS-P1-015` — **T**: `apdu_fragment_assembler` covers the
+  transport-level (raw ISO-DEP) chaining/reassembly this AWP owns.
+  Aliro-level command chaining (AUTH0/LOAD CERT/AUTH1/EXCHANGE) is stack-owned
+  and out of scope; updated to `app-implemented (transport-level reassembly
+  only)`.
+- No other Phase 1 requirement has any implementation in AWP1.
+
+### External stack observations (not blocking AWP1)
+
+- `Aliro::Interface::Logging::Log()`/`LogHexdump()` is a role-neutral
+  platform contract: `stack/src/aliro/log.h` (included by
+  `stack/src/user_device/log.h`) declares and calls it unconditionally for
+  every `ALIRO_UD_LOG_*` call site, regardless of role/Kconfig. AWP0 never
+  linked this symbol because it never reached any `stack/src/user_device/*`
+  code path that logs; this AWP's `UserDeviceSessionManager`/
+  `UserDeviceSession` calls do, and the DK build failed at link time with
+  `undefined reference to Aliro::Interface::Logging::Log(...)` until
+  `src/platform/os/os_logging.cpp` was added. The public
+  `include/aliro/interface.h` only declares this namespace under
+  `#if CONFIG_NCS_ALIRO_LOG_LEVEL_VALUE > 0` (Reader-only) — not usable for
+  a User-Device-only build, where that Kconfig symbol does not exist at
+  all — so `os_logging.cpp` declares matching signatures locally instead of
+  including that header, mirroring the private
+  `stack/src/aliro/log.h` declarations that `ALIRO_UD_LOG_*` actually calls.
+  No `ncs-aliro` changes were made; flagged here in case a future `ncs-aliro`
+  revision adds a `CONFIG_NCS_ALIRO_USER_DEVICE_LOG_LEVEL_VALUE`-gated
+  declaration of this namespace to the public header, which would let this
+  app include it directly instead of re-declaring.
+
+### Security check
+
+- `grep`-reviewed all files touched in this AWP: no private key,
+  `Kpersistent`, or session-key material is read, stored, or logged (no
+  credential/crypto/authorization code exists yet; AWP1 is transport/OS
+  bridging only). Command APDU/response bytes are logged only at `LOG_ERR`
+  on the transport-layer framing-overflow path, and never at a level that
+  would include field/session key material once it exists (revisit this
+  bound in AWP5/AWP6 when protected AUTH1/EXCHANGE payloads exist).
+
+### Outstanding items for future AWPs
+
+- Physical Aliro reader/PCA64110 antenna tap for `-002`/`-013` (this
+  invocation confirmed NFC T4T listen mode starts on the DK, but no reader
+  hardware was available to perform an actual field test).
+- `ALIRO-UD-SYRS-P1-040` (NFC/processing-time bounds): `GetTimingConstraints()`
+  currently returns the default/unconstrained value; AWP7 adds the exact
+  ALIRO-TP bounds and on-target measurement.

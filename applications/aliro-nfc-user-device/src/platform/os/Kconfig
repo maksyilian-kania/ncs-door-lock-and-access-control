@@ -1,0 +1,25 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+menu "OS bridge"
+
+config ALIRO_UD_OS_MAX_TIMERS
+	int "Maximum concurrently acquired Aliro::Interface::UserDevice::Os::Timer slots"
+	default 4
+	help
+	  Size of the fixed pool backing Aliro::Interface::UserDevice::Os::Timer.
+	  P1 uses one timer per active User Device session (the session
+	  watchdog; at most one session in P1) plus headroom for later
+	  application-owned timers (for example the AWP4 authorization
+	  window).
+
+module = ALIRO_UD_OS
+module-str = ALIRO_UD_OS
+module-dep = LOG
+module-help = Enables Aliro NFC User Device OS bridge log messages.
+source "$(ZEPHYR_BASE)/subsys/logging/Kconfig.template.log_config"
+
+endmenu # OS bridge

@@ -5,5 +5,11 @@
 #
 
 # Aliro::Interface::UserDevice::Os contract (event queue, mutex, timer, and
-# trusted-time bindings) implemented with Zephyr primitives. Implemented
-# starting with AWP1.
+# trusted-time bindings) implemented with Zephyr primitives (AWP1).
+target_sources(app PRIVATE
+  os_mutex.cpp
+  os_timer.cpp
+  os_queue.cpp
+  os_trusted_time.cpp
+  os_logging.cpp
+)

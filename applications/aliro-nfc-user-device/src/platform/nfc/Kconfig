@@ -1,0 +1,40 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+menu "NFC transport"
+
+config ALIRO_UD_NFC_THREAD_STACK_SIZE
+	int "NFC/stack worker thread stack size"
+	default 2048
+	help
+	  Stack size for the dedicated high-priority thread that serializes
+	  NFC transport events (field on/off, complete command APDUs) and
+	  deferred Aliro User Device stack events into calls on
+	  Aliro::UserDeviceStack. nfc_t4t_lib callbacks never call the stack
+	  directly; see APP_PLAN.md AWP1.
+
+config ALIRO_UD_NFC_THREAD_PRIORITY
+	int "NFC/stack worker thread priority"
+	default 5
+	help
+	  Zephyr preemptible priority (K_PRIO_PREEMPT) of the dedicated
+	  NFC/stack worker thread.
+
+config ALIRO_UD_NFC_EVENT_QUEUE_DEPTH
+	int "NFC/stack worker bounded event queue depth"
+	default 4
+	help
+	  Depth of the bounded queue feeding the NFC/stack worker thread.
+	  Events posted while the queue is full are dropped deterministically
+	  (logged, never blocking the producer); see docs/evidence.md.
+
+module = ALIRO_UD_NFC
+module-str = ALIRO_UD_NFC
+module-dep = LOG
+module-help = Enables Aliro NFC User Device NFC transport log messages.
+source "$(ZEPHYR_BASE)/subsys/logging/Kconfig.template.log_config"
+
+endmenu # NFC transport

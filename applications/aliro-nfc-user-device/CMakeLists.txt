@@ -10,6 +10,7 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(aliro-nfc-user-device)
 
 target_sources(app PRIVATE src/main.cpp)
+target_include_directories(app PRIVATE src)
 
 add_subdirectory(src/platform/nfc)
 add_subdirectory(src/platform/os)

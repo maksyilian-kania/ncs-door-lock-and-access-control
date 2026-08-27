@@ -6,4 +6,9 @@
 
 # NFC-A Type 4 Tag/ISO-DEP listen transport: connects nfc_t4t_lib to the
 # Aliro::UserDeviceStack session/command-APDU facade through a bounded queue
-# and dedicated NFC/stack thread. Implemented starting with AWP1.
+# and dedicated NFC/stack thread (AWP1).
+target_sources(app PRIVATE
+  apdu_fragment_assembler.cpp
+  nfc_worker.cpp
+  nfc_transport.cpp
+)

@@ -1,0 +1,17 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+mainmenu "Aliro NFC User Device"
+
+module = ALIRO_UD_APP
+module-str = ALIRO_UD_APP
+module-dep = LOG
+module-help = Enables Aliro NFC User Device application log messages.
+source "$(ZEPHYR_BASE)/subsys/logging/Kconfig.template.log_config"
+
+rsource "src/platform/Kconfig"
+
+source "Kconfig.zephyr"

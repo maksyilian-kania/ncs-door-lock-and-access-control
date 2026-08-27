@@ -9,14 +9,15 @@
 
 #include <aliro/user_device/user_device.h>
 
+#include "platform/nfc/nfc_transport.h"
+
 LOG_MODULE_REGISTER(aliro_nfc_ud, LOG_LEVEL_INF);
 
 /*
- * main() performs boot sequencing only (see docs/architecture.md). NFC
- * transport, OS bridging, credential/mailbox storage, authorization, and the
- * development CLI are implemented in their own platform/storage/cli modules
- * starting with AWP1; none of that protocol or platform behavior belongs
- * here.
+ * main() performs boot sequencing only (see docs/architecture.md).
+ * Credential/mailbox storage, authorization, and the development CLI are
+ * implemented in their own storage/cli modules starting with later AWPs;
+ * none of that protocol or platform behavior belongs here.
  */
 int main(void)
 {
@@ -37,6 +38,18 @@ int main(void)
 	}
 
 	LOG_INF("User Device stack initialized");
+
+	/*
+	 * Starts the dedicated NFC/stack worker thread and NFC-A Type 4
+	 * Tag/ISO-DEP listen-mode transport (AWP1). Field activation/removal
+	 * and command APDUs are mapped to UserDeviceStack session lifecycle
+	 * calls on that worker thread from here on; main() has no further
+	 * role to play.
+	 */
+	if (AliroUd::Nfc::Start() != 0) {
+		LOG_ERR("NFC transport initialization failed");
+		return 0;
+	}
 
 	return 0;
 }
