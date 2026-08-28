@@ -10,6 +10,7 @@
 #include <aliro/user_device/user_device.h>
 
 #include "platform/nfc/nfc_transport.h"
+#include "platform/os/app_status.h"
 
 LOG_MODULE_REGISTER(aliro_nfc_ud, LOG_LEVEL_INF);
 
@@ -34,6 +35,7 @@ int main(void)
 		 * skeleton around that gap; see docs/evidence.md.
 		 */
 		LOG_ERR("User Device stack initialization failed: %d", err.ToInt());
+		AliroUd::AppStatus::SetInitState(AliroUd::AppStatus::InitState::StackInitFailed);
 		return 0;
 	}
 
@@ -48,8 +50,11 @@ int main(void)
 	 */
 	if (AliroUd::Nfc::Start() != 0) {
 		LOG_ERR("NFC transport initialization failed");
+		AliroUd::AppStatus::SetInitState(AliroUd::AppStatus::InitState::NfcStartFailed);
 		return 0;
 	}
+
+	AliroUd::AppStatus::SetInitState(AliroUd::AppStatus::InitState::Running);
 
 	return 0;
 }

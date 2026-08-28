@@ -6,3 +6,4 @@
 
 # Development CLI over the DK virtual UART (Zephyr shell, "aliro-ud" root
 # command). Implemented starting with AWP2.
+target_sources(app PRIVATE cli.cpp)

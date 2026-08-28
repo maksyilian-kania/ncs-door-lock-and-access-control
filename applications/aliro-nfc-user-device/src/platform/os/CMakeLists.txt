@@ -12,4 +12,5 @@ target_sources(app PRIVATE
   os_queue.cpp
   os_trusted_time.cpp
   os_logging.cpp
+  app_status.cpp
 )

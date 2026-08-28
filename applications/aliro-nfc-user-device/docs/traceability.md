@@ -29,7 +29,7 @@ and `-014` remain stack-owned but are now exercisable end-to-end through
 this transport (see the AWP0 status legend above). Every other row is
 unchanged from AWP0 (`not-yet-verifiable`).
 
-**Post-AWP1 lifecycle-race hardening pass** (this fix): `platform/nfc`
+**Post-AWP1 lifecycle-race hardening pass**: `platform/nfc`
 was reworked to make FIELD_ON/FIELD_OFF idempotent, to synchronize the
 application's local session-active belief with independent stack-driven
 termination, to reject command APDUs deterministically when no session is
@@ -42,11 +42,23 @@ results; the `-002`/`-013` rows below are unchanged in status but their
 supporting `worker_lifecycle` test evidence now also covers this hardened
 lifecycle behavior.
 
+**AWP2** implements `src/cli` (Zephyr shell on the DK virtual UART,
+`aliro-ud` root command, `info` command, credential staging command
+shells) per `APP_PLAN.md` AWP2 scope, covering `-003`. It also adds
+placeholder (not-yet-implemented) `src/storage/credential` and
+`src/platform/authorization` implementations — needed only because the
+checked-out `ncs-aliro` moved to WP5, whose `CredentialManager`/
+`EventHandler` now call those contracts unconditionally — so the
+application and every test linking the real stack continue to build; see
+`docs/evidence.md` for why these are stubs, not real behavior, and remain
+`not-yet-verifiable` below. Credential-management coverage (`-004` through
+`-010`) still begins only in AWP3, which replaces these stub files.
+
 | ID | Requirement (summary) | App files (this AWP) | Stack ownership | Tests | DK evidence | Normative citation | Status |
 |---|---|---|---|---|---|---|---|
 | ALIRO-UD-SYRS-P1-001 | Execute on nRF54LM20B DK + PCA64110 antenna. | `CMakeLists.txt`, `prj.conf`, `src/main.cpp`, `src/platform/nfc`, `src/platform/os` | — | `build.aliro_nfc_user_device` (twister, DK target build) | Flashed to a physical nRF54LM20 DK (serial 1051885995) and booted; console log shows stack init and NFC T4T listen mode start (see `docs/evidence.md`) | NORDIC-DK; project constraint | verified-end-to-end |
 | ALIRO-UD-SYRS-P1-002 | Operate as NFC-A Type 4 Tag Platform / ISO-DEP listen mode. | `src/platform/nfc/nfc_transport.{h,cpp}`, `nfc_worker.{h,cpp}`, `apdu_fragment_assembler.{h,cpp}` | SELECT/ISO-DEP session behavior | `apdu_fragment_assembler` (fragment assembly/overflow/reset, host), `worker_lifecycle` (12 cases: idempotent field on/off, stack-driven timeout termination, duplicate/stale events, field-loss race, queue overflow forcing session recovery without dropping FIELD_OFF, APDU rejection with no active session, host, real stack) | NFC T4T listen mode confirmed started on DK console log (see `docs/evidence.md`); no physical reader/antenna tap performed yet | ALIRO-SPEC §10.1, p.93; NORDIC-NFC | app-implemented |
-| ALIRO-UD-SYRS-P1-003 | Line-oriented CLI over DK virtual UART, 115200 8N1. | `src/cli` (skeleton only) | — | — | — | Project constraint; NORDIC-DK | not-yet-verifiable |
+| ALIRO-UD-SYRS-P1-003 | Line-oriented CLI over DK virtual UART, 115200 8N1. | `src/cli/cli.cpp`, `src/platform/os/app_status.{h,cpp}`, `prj.conf` (`CONFIG_SHELL=y`) | — | `cli_info` (3 cases: `info` fields/format, live session-state reflection, credential-shell `ERR NOT_IMPLEMENTED` responses; host, native shell/dummy backend, real stack) | Flashed to physical nRF54LM20 DK (serial 1051885995) and driven over the shell virtual COM port at 115200-8N1: `aliro-ud info`, `credential begin-create/set-key/commit/abort` (all deterministic `OK`/`ERR NOT_IMPLEMENTED` lines), and command-tree/`help` listing (see `docs/evidence.md`) | Project constraint; NORDIC-DK | verified-end-to-end |
 | ALIRO-UD-SYRS-P1-004 | CLI provisions Access Credential (key, bindings, trust, policy, timestamps, mailbox config, optional documents). | `src/storage/credential`, `src/cli` (skeletons only) | — | — | — | ALIRO-SPEC §§6.2, 8.3.1.14–15 | not-yet-verifiable |
 | ALIRO-UD-SYRS-P1-005 | CLI create/update/inspect/delete/factory-reset with deterministic results. | `src/storage/credential`, `src/cli` (skeletons only) | — | — | — | Project constraint | not-yet-verifiable |
 | ALIRO-UD-SYRS-P1-006 | Reject malformed provisioning input without changing committed state. | `src/storage/credential` (skeleton only) | — | — | — | Project constraint; security objective | not-yet-verifiable |

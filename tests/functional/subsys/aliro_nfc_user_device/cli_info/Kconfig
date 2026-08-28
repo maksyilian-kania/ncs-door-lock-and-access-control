@@ -1,0 +1,16 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+mainmenu "Aliro NFC User Device - CLI Info Test"
+
+# Pulls in CONFIG_ALIRO_UD_NFC_* and CONFIG_ALIRO_UD_OS_*: this test builds
+# the real platform/nfc/nfc_worker.cpp and platform/os/*.cpp sources
+# directly (see CMakeLists.txt), so it needs the same Kconfig options they
+# reference, normally sourced via the application's own Kconfig.
+rsource "../../../../../applications/aliro-nfc-user-device/src/platform/nfc/Kconfig"
+rsource "../../../../../applications/aliro-nfc-user-device/src/platform/os/Kconfig"
+
+source "Kconfig.zephyr"
