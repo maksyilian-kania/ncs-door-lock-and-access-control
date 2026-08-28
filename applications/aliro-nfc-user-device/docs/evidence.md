@@ -414,3 +414,116 @@ topdir).
 - `ALIRO-UD-SYRS-P1-040` (NFC/processing-time bounds): `GetTimingConstraints()`
   currently returns the default/unconstrained value; AWP7 adds the exact
   ALIRO-TP bounds and on-target measurement.
+
+## Post-AWP1 — NFC lifecycle-race hardening pass
+
+Not a numbered AWP: a defect-fix pass over `platform/nfc` (AWP1 deliverable)
+addressing 8 issues found by analysis of the AWP1 implementation.
+
+### Baseline
+
+- West topdir: `/home/mak5-local/gesture-access` (manifest file `west-aliro.yml`).
+- `ncs-aliro` checked-out revision at the time of this pass:
+  `80da2641` (`user_device: WP4: add complementary Access Protocol codecs and
+  HSM sequencing`), a descendant of the minimum baseline
+  `b8bed857b482d288168185e76d5452469739fbdd`
+  (`git -C <west-topdir>/ncs-aliro merge-base --is-ancestor b8bed857... HEAD`
+  confirmed). The sibling checkout had drifted to an unrelated older commit
+  before this pass; it was restored to a valid descendant of the recorded
+  baseline (not a `west update`) before building. `session_manager.h`,
+  `event_handler.h`, and `include/aliro/user_device/interface.h` were
+  diffed against the exact `b8bed857` baseline and are unchanged, so no
+  re-audit of the public contract was needed.
+
+### Issues addressed (`src/platform/nfc/nfc_worker.{h,cpp}`, `nfc_transport.cpp`)
+
+1. **Idempotent activation.** The worker now tracks a local
+   `sSessionActive` flag. `FIELD_ON` only calls `ActivateSession()` while
+   inactive, and only sets the flag after a successful call; a duplicate
+   `FIELD_ON` is logged and ignored with zero additional stack calls
+   (`GetActivationAttemptCount()` proves this in tests).
+2. **Idempotent deactivation.** `FIELD_OFF` only calls
+   `DeactivateSession()` while active; a stale/duplicate `FIELD_OFF` is a
+   logged no-op, removing the startup "session not found" warning.
+3. **Stack-driven termination synchronization.**
+   `Aliro::Interface::UserDevice::Nfc::HandleTermination()` now calls the
+   new `AliroUd::Nfc::NotifySessionTerminated()`, which clears the local
+   flag whenever the stack ends a session independently (watchdog
+   timeout), confirmed always to run on the worker thread.
+4. **APDUs without an active session.** `HandleEvent()` now checks
+   `sSessionActive` before calling `HandleCommandApdu()`; an APDU received
+   while inactive is logged, counted (`GetRejectedApduCount()`), and
+   dropped without reaching the stack.
+5. **No more silently-dropped lifecycle events.** `FIELD_ON`/`FIELD_OFF`
+   no longer share the bounded `k_msgq` with command APDUs/stack events;
+   they are coalesced onto a dedicated always-succeeding pending-intent
+   slot (`sPendingField`) signalled through a semaphore, multiplexed with
+   the bounded queue via `k_poll()`. A `CommandApdu`/`StackEvent` that
+   cannot be queued (overflow) now sets `sForceRecoveryRequested` and
+   forces deterministic teardown of any active session on the worker's
+   next wake, instead of silently continuing on skipped data.
+6. **`sAssembler` ownership race.** Added `k_spinlock sAssemblerLock` in
+   `nfc_transport.cpp`, held across every `sAssembler` access
+   (`HandleDataIndication()`'s add/get/reset and `ResetAssembly()`),
+   closing the race between the `nfc_t4t_lib` callback thread and the
+   worker thread (`HandleTermination()`).
+7. **Lifecycle tests.** `tests/functional/subsys/aliro_nfc_user_device/worker_lifecycle`
+   now covers, in addition to the AWP1 cases: `ON -> APDUs -> ON -> APDUs ->
+   OFF`, `ON -> timeout termination -> ON` (shortened watchdog via
+   `CONFIG_NCS_ALIRO_USER_DEVICE_SESSION_TIMEOUT_NFC=500` for this test
+   binary only), `ON -> OFF -> ON`, `ON -> queue overflow involving OFF`,
+   and APDU rejection both before any `FIELD_ON` and after termination.
+   The duplicate-`FIELD_ON` case now asserts
+   `GetActivationAttemptCount() == 1`, not just survival.
+8. **Diagnostics.** Added symbolic `LOG_INF` lines for all four
+   transitions (`FIELD_ON: inactive -> active`, `FIELD_ON: already active,
+   ignored`, `FIELD_OFF: active -> inactive`, `STACK_TERMINATION: active ->
+   inactive`), plus always-on `IsSessionActive()`,
+   `GetActivationAttemptCount()`, `GetRejectedApduCount()` accessors.
+
+### Kconfig/prj.conf changes
+
+- `applications/aliro-nfc-user-device/prj.conf`: added `CONFIG_POLL=y`
+  (required by the worker's `k_poll()` multiplexing).
+- `tests/functional/subsys/aliro_nfc_user_device/worker_lifecycle/prj.conf`:
+  added `CONFIG_POLL=y` and
+  `CONFIG_NCS_ALIRO_USER_DEVICE_SESSION_TIMEOUT_NFC=500` (shortened
+  watchdog for the timeout-termination test only).
+
+### Commands run and results
+
+Toolchain invoked via `ncs4`, from `/home/mak5-local/gesture-access` (west
+topdir).
+
+1. `west twister -T tests/functional/subsys/aliro_nfc_user_device/worker_lifecycle -p native_sim/native/64`
+   — **Result: pass.** 12/12 test cases passed (first attempt at a 100 ms
+   shortened watchdog timeout spuriously failed 3/12 unrelated cases whose
+   idle gaps between events exceeded 100 ms; raised to 500 ms, confirmed
+   safely above the largest unrelated idle gap of ~100 ms, and the 3 cases
+   passed).
+2. `west twister -T tests/functional/subsys/aliro_nfc_user_device -T applications/aliro-nfc-user-device -p native_sim/native/64 -p nrf54lm20dk/nrf54lm20b/cpuapp`
+   — **Result: pass.** 3 of 4 test configurations executed and passed
+   (`host_smoke`, `apdu_fragment_assembler`, `worker_lifecycle`; 20/20 test
+   cases), 1 built-only (`build.aliro_nfc_user_device`, DK target, no
+   hardware runner configured in Twister).
+3. `west build -b nrf54lm20dk/nrf54lm20b/cpuapp applications/aliro-nfc-user-device --pristine`
+   — **Result: pass.** FLASH 60544 B (2.90%), RAM 37616 B (7.19%) (up from
+   AWP1's 55968 B/19128 B; the increase is `CONFIG_POLL`/`k_poll()` plus the
+   new diagnostics counters and coalesced-field-channel state).
+4. No physical DK flash/reader tap was performed for this pass (no new
+   hardware-observable behavior; the AWP1 DK boot evidence above still
+   applies unchanged).
+
+### Security check
+
+- `grep`-reviewed all files touched in this pass: no private key,
+  `Kpersistent`, or session-key material is read, stored, or logged. New
+  log lines are session-lifecycle-state only (symbolic event names, no
+  APDU/key bytes beyond the pre-existing framing-overflow `LOG_ERR`).
+
+### Outstanding items
+
+- `west-aliro.yml` and `docs/Requirements.pdf` remain untracked/unstaged
+  per explicit user instruction; not committed by this pass.
+- No commit was made for this pass; changes are left in the working tree
+  for the user to review and resume AWP work on top of.

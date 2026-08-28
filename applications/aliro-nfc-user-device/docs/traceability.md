@@ -29,10 +29,23 @@ and `-014` remain stack-owned but are now exercisable end-to-end through
 this transport (see the AWP0 status legend above). Every other row is
 unchanged from AWP0 (`not-yet-verifiable`).
 
+**Post-AWP1 lifecycle-race hardening pass** (this fix): `platform/nfc`
+was reworked to make FIELD_ON/FIELD_OFF idempotent, to synchronize the
+application's local session-active belief with independent stack-driven
+termination, to reject command APDUs deterministically when no session is
+believed active, to never silently drop a lifecycle transition (coalesced
+field intent channel + forced session recovery on queue overflow, replacing
+the previous "drop everything on overflow" model), and to remove the
+`sAssembler` cross-thread race between the `nfc_t4t_lib` callback and the
+worker thread. See `docs/evidence.md` for the detailed change list and test
+results; the `-002`/`-013` rows below are unchanged in status but their
+supporting `worker_lifecycle` test evidence now also covers this hardened
+lifecycle behavior.
+
 | ID | Requirement (summary) | App files (this AWP) | Stack ownership | Tests | DK evidence | Normative citation | Status |
 |---|---|---|---|---|---|---|---|
 | ALIRO-UD-SYRS-P1-001 | Execute on nRF54LM20B DK + PCA64110 antenna. | `CMakeLists.txt`, `prj.conf`, `src/main.cpp`, `src/platform/nfc`, `src/platform/os` | — | `build.aliro_nfc_user_device` (twister, DK target build) | Flashed to a physical nRF54LM20 DK (serial 1051885995) and booted; console log shows stack init and NFC T4T listen mode start (see `docs/evidence.md`) | NORDIC-DK; project constraint | verified-end-to-end |
-| ALIRO-UD-SYRS-P1-002 | Operate as NFC-A Type 4 Tag Platform / ISO-DEP listen mode. | `src/platform/nfc/nfc_transport.{h,cpp}`, `nfc_worker.{h,cpp}`, `apdu_fragment_assembler.{h,cpp}` | SELECT/ISO-DEP session behavior | `apdu_fragment_assembler` (fragment assembly/overflow/reset, host), `worker_lifecycle` (field on/off, duplicate/stale events, field-loss race, queue overflow, host, real stack) | NFC T4T listen mode confirmed started on DK console log (see `docs/evidence.md`); no physical reader/antenna tap performed yet | ALIRO-SPEC §10.1, p.93; NORDIC-NFC | app-implemented |
+| ALIRO-UD-SYRS-P1-002 | Operate as NFC-A Type 4 Tag Platform / ISO-DEP listen mode. | `src/platform/nfc/nfc_transport.{h,cpp}`, `nfc_worker.{h,cpp}`, `apdu_fragment_assembler.{h,cpp}` | SELECT/ISO-DEP session behavior | `apdu_fragment_assembler` (fragment assembly/overflow/reset, host), `worker_lifecycle` (12 cases: idempotent field on/off, stack-driven timeout termination, duplicate/stale events, field-loss race, queue overflow forcing session recovery without dropping FIELD_OFF, APDU rejection with no active session, host, real stack) | NFC T4T listen mode confirmed started on DK console log (see `docs/evidence.md`); no physical reader/antenna tap performed yet | ALIRO-SPEC §10.1, p.93; NORDIC-NFC | app-implemented |
 | ALIRO-UD-SYRS-P1-003 | Line-oriented CLI over DK virtual UART, 115200 8N1. | `src/cli` (skeleton only) | — | — | — | Project constraint; NORDIC-DK | not-yet-verifiable |
 | ALIRO-UD-SYRS-P1-004 | CLI provisions Access Credential (key, bindings, trust, policy, timestamps, mailbox config, optional documents). | `src/storage/credential`, `src/cli` (skeletons only) | — | — | — | ALIRO-SPEC §§6.2, 8.3.1.14–15 | not-yet-verifiable |
 | ALIRO-UD-SYRS-P1-005 | CLI create/update/inspect/delete/factory-reset with deterministic results. | `src/storage/credential`, `src/cli` (skeletons only) | — | — | — | Project constraint | not-yet-verifiable |

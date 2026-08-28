@@ -6,6 +6,8 @@
 
 #include "fake_nfc_interface.h"
 
+#include "platform/nfc/nfc_worker.h"
+
 #include <aliro/user_device/interface.h>
 
 namespace {
@@ -59,6 +61,13 @@ void HandleTermination(ConnectionHandle handle)
 	(void)handle;
 
 	gTerminationCount++;
+
+	/*
+	 * Mirrors the real nfc_transport.cpp::HandleTermination(): the worker
+	 * must learn that the stack ended the session so its local
+	 * "session active" belief never goes stale (AWP1 lifecycle-race fix).
+	 */
+	AliroUd::Nfc::NotifySessionTerminated();
 }
 
 TimingConstraints GetTimingConstraints(ConnectionHandle handle)

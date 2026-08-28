@@ -25,14 +25,18 @@ namespace AliroUd::Nfc {
 /*
  * Raw ISO-DEP fragment reassembly state (APP_PLAN.md AWP1: "Keep transport
  * fragment assembly in this module. Do not parse Aliro APDUs."). Owned
- * exclusively by this translation unit. nfc_t4t_lib invokes its event
- * callback serially from its own execution context, so this does not need
- * additional synchronization, but it must never be touched from any other
- * thread (in particular, not from the worker thread). The assembly logic
- * itself lives in the host-testable ApduFragmentAssembler; only the
- * nfc_t4t_lib glue (this file) is hardware-dependent.
+ * exclusively by this translation unit, but touched from two execution
+ * contexts: the nfc_t4t_lib callback (HandleDataIndication(), and
+ * FIELD_ON/FIELD_OFF in NfcCallback()) and the NFC/stack worker thread
+ * (ResetAssembly(), via HandleTermination() below). `sAssemblerLock`
+ * serializes every access; neither critical section blocks/sleeps, so a
+ * spinlock is sufficient and avoids priority-inversion/scheduling concerns.
+ * The assembly logic itself lives in the host-testable
+ * ApduFragmentAssembler; only the nfc_t4t_lib glue (this file) is
+ * hardware-dependent.
  */
 static ApduFragmentAssembler sAssembler{};
+static struct k_spinlock sAssemblerLock{};
 
 /*
  * The response transmit buffer. `SendResponseApdu()` copies into it and
@@ -47,7 +51,9 @@ static std::array<uint8_t, kMaxApduLength> sTransmitBuffer{};
 
 static void ResetAssembly()
 {
+	const k_spinlock_key_t key = k_spin_lock(&sAssemblerLock);
 	sAssembler.Reset();
+	k_spin_unlock(&sAssemblerLock, key);
 }
 
 namespace {
@@ -55,14 +61,19 @@ namespace {
 void HandleDataIndication(const uint8_t *data, size_t dataLength, uint32_t flags)
 {
 	const bool more = (flags & NFC_T4T_DI_FLAG_MORE) != 0U;
+
+	const k_spinlock_key_t key = k_spin_lock(&sAssemblerLock);
 	const auto result = sAssembler.AddFragment(data, dataLength, more);
 
 	switch (result) {
 	case ApduFragmentAssembler::Result::Incomplete:
 		/* Chained fragment: wait for the rest before posting a command. */
+		k_spin_unlock(&sAssemblerLock, key);
 		return;
 
 	case ApduFragmentAssembler::Result::Overflow: {
+		k_spin_unlock(&sAssemblerLock, key);
+
 		LOG_ERR("Command APDU fragment assembly overflow, discarding message");
 
 		/*
@@ -83,12 +94,22 @@ void HandleDataIndication(const uint8_t *data, size_t dataLength, uint32_t flags
 	}
 
 	case ApduFragmentAssembler::Result::Complete: {
+		/*
+		 * Copy the assembled bytes out and reset while still holding the
+		 * lock, so a concurrent ResetAssembly() from the worker thread
+		 * (HandleTermination()) can never observe/corrupt a half-copied
+		 * buffer. PostCommandApdu() only does a bounded memcpy and a
+		 * non-blocking k_msgq_put(), so calling it under the spinlock is
+		 * safe (no sleep/scheduling call).
+		 */
 		const auto assembled = sAssembler.GetAssembled();
 		const int err = PostCommandApdu(assembled.data(), assembled.size());
+		sAssembler.Reset();
+		k_spin_unlock(&sAssemblerLock, key);
+
 		if (err != 0) {
 			LOG_ERR("Failed to post assembled command APDU, error: %d", err);
 		}
-		sAssembler.Reset();
 		return;
 	}
 	}
@@ -101,16 +122,12 @@ void NfcCallback(void *context, nfc_t4t_event_t event, const uint8_t *data, size
 	switch (event) {
 	case NFC_T4T_EVENT_FIELD_ON:
 		ResetAssembly();
-		if (const int err = PostFieldOn(); err != 0) {
-			LOG_ERR("Failed to post field-on event, error: %d", err);
-		}
+		PostFieldOn();
 		break;
 
 	case NFC_T4T_EVENT_FIELD_OFF:
 		ResetAssembly();
-		if (const int err = PostFieldOff(); err != 0) {
-			LOG_ERR("Failed to post field-off event, error: %d", err);
-		}
+		PostFieldOff();
 		break;
 
 	case NFC_T4T_EVENT_DATA_IND:
@@ -170,6 +187,7 @@ void HandleTermination(ConnectionHandle handle)
 {
 	ARG_UNUSED(handle);
 	AliroUd::Nfc::ResetAssembly();
+	AliroUd::Nfc::NotifySessionTerminated();
 }
 
 TimingConstraints GetTimingConstraints(ConnectionHandle handle)
