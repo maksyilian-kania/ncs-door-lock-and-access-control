@@ -1,0 +1,85 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+#
+# Persistent storage backend for Aliro::Interface::UserDevice::Credential and
+# ::Trust (APP_PLAN.md AWP3). Mirrors the settings/NVS-or-ZMS defaults
+# established by applications/aliro-access-control-app/Kconfig.defconfig for
+# the same board family.
+#
+config FLASH
+	default y
+
+config FLASH_MAP
+	default y
+
+config NVS
+	default y if !SOC_FLASH_NRF_RRAM
+
+config NVS_LOOKUP_CACHE_SIZE
+	default 512 if NVS
+
+config NVS_LOOKUP_CACHE_FOR_SETTINGS
+	default y if SETTINGS_NVS
+
+config ZMS
+	default y if SOC_FLASH_NRF_RRAM
+
+config ZMS_LOOKUP_CACHE_SIZE
+	default 512 if SETTINGS_ZMS
+
+config ZMS_LOOKUP_CACHE_FOR_SETTINGS
+	default y if SETTINGS_ZMS
+
+config SETTINGS
+	default y
+
+choice NVS_LOG_LEVEL_CHOICE
+	default NVS_LOG_LEVEL_ERR
+endchoice
+
+choice ZMS_LOG_LEVEL_CHOICE
+	default ZMS_LOG_LEVEL_ERR
+endchoice
+
+choice SETTINGS_LOG_LEVEL_CHOICE
+	default SETTINGS_LOG_LEVEL_ERR
+endchoice
+
+#
+# PSA/CRACEN/KMU persistent key storage for imported Access Credential
+# private keys (APP_PLAN.md AWP3). Mirrors
+# applications/aliro-access-control-app/Kconfig.crypto.defconfig.
+#
+config PSA_CRYPTO
+	default y
+
+config TRUSTED_STORAGE
+	default y
+
+config MBEDTLS_PSA_CRYPTO_STORAGE_C
+	default y
+
+choice TRUSTED_STORAGE_BACKEND_AEAD_KEY
+	default TRUSTED_STORAGE_BACKEND_AEAD_KEY_HASH_UID if SOC_SERIES_NRF52
+	default TRUSTED_STORAGE_BACKEND_AEAD_KEY_DERIVE_FROM_HUK
+endchoice
+
+config HW_UNIQUE_KEY_WRITE_ON_CRYPTO_INIT
+	default y if (SOC_NRF5340_CPUAPP || SOC_SERIES_NRF54L)
+
+config MBEDTLS_ENABLE_HEAP
+	default y
+
+config MBEDTLS_HEAP_SIZE
+	default 8192
+
+# One committed + one staged persistent key per credential slot.
+config MBEDTLS_PSA_KEY_SLOT_COUNT
+	default 16
+
+config HEAP_MEM_POOL_SIZE
+	default 4096

@@ -18,16 +18,28 @@
  * authorization) rather than falsely authorizing a transaction. The real DK
  * button/authorization-window/LED implementation is added in AWP4
  * (APP_PLAN.md).
+ *
+ * GetState()'s error-bearing signature (WP5.5, decision D7) is adopted here
+ * unchanged from the pre-WP5.5 `AuthorizationState GetState(handle)` stub;
+ * AWP4 owns the real backend/failure-injection behavior.
  */
 LOG_MODULE_REGISTER(aliro_ud_authorization, LOG_LEVEL_WRN);
 
 namespace Aliro::Interface::UserDevice::Authorization {
 
-::Aliro::UserDevice::AuthorizationState GetState(::Aliro::UserDevice::CredentialHandle handle)
+AliroError GetState(::Aliro::UserDevice::CredentialHandle handle, ::Aliro::UserDevice::AuthorizationState &outState)
 {
 	ARG_UNUSED(handle);
-	/* Fail closed: no authorization window can ever be granted yet. */
-	return ::Aliro::UserDevice::AuthorizationState::Required;
+	/*
+	 * Fail closed: no authorization window can ever be granted yet.
+	 * `Required` (not `Denied`) preserves this stub's pre-WP5.5 meaning
+	 * exactly ("needed, never yet granted") rather than the stronger
+	 * "explicitly denied" signal; per the contract doc, `outState` would
+	 * only need to default to `Denied` on an *error* return, which this
+	 * stub never produces.
+	 */
+	outState = ::Aliro::UserDevice::AuthorizationState::Required;
+	return ALIRO_NO_ERROR;
 }
 
 void NotifyAuthenticationRequired(::Aliro::UserDevice::CredentialHandle handle)

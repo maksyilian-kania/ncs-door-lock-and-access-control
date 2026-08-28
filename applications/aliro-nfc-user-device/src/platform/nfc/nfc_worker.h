@@ -102,6 +102,22 @@ int PostStackEvent(void *event);
  */
 void NotifySessionTerminated();
 
+/**
+ * @brief Prevents NFC field activation and synchronously terminates any
+ * currently active session (APP_PLAN.md AWP3 lifecycle coordinator).
+ *
+ * Blocks the calling thread until the worker thread has processed the
+ * request: on return, no session is active and no FIELD_ON observed after
+ * this call returns will activate one, until `ExitMaintenancePause()` is
+ * called. Must be paired with exactly one `ExitMaintenancePause()` call;
+ * nesting is not supported (see `AliroUd::Lifecycle::RunMutation()`, the
+ * only intended caller).
+ */
+void EnterMaintenancePause();
+
+/** @brief Re-allows NFC field activation after `EnterMaintenancePause()`. */
+void ExitMaintenancePause();
+
 /** @brief Diagnostics: whether the application currently believes a session is active. */
 bool IsSessionActive();
 

@@ -4,12 +4,19 @@
 # SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
 #
 
-# Aliro::Interface::UserDevice::Credential and Trust contracts: Zephyr
-# settings/NVS-backed non-secret metadata, per-binding reader trust, and the
-# persistent transaction journal spanning NVS and PSA key storage.
-# Implemented in AWP3.
+# Aliro::Interface::UserDevice::Credential and Trust contracts (APP_PLAN.md
+# AWP3): Zephyr settings/NVS-or-ZMS-backed non-secret metadata, per-binding
+# reader trust, PSA/CRACEN/KMU-backed persistent private-key storage, and
+# the persistent transaction journal spanning both.
 #
-# credential.cpp is a placeholder (empty credential set, "not provisioned"
-# trust) added only to keep the application linking against the currently
-# checked-out stack (ncs-aliro WP5); AWP3 replaces its contents.
-target_sources(app PRIVATE credential.cpp)
+# credential.cpp is a thin adapter to credential_store.cpp, the real
+# engine. credential_persistence_settings.cpp and key_backend_psa.cpp are
+# the real (hardware-backed) persistence/key backends; host tests swap in
+# application-owned in-memory fakes instead (see
+# tests/functional/subsys/aliro_nfc_user_device/common/).
+target_sources(app PRIVATE
+  credential.cpp
+  credential_store.cpp
+  credential_persistence_settings.cpp
+  key_backend_psa.cpp
+)

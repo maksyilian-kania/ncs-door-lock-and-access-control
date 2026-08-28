@@ -11,18 +11,29 @@
 
 #include "platform/nfc/nfc_transport.h"
 #include "platform/os/app_status.h"
+#include "storage/credential/credential_store.h"
 
 LOG_MODULE_REGISTER(aliro_nfc_ud, LOG_LEVEL_INF);
 
 /*
  * main() performs boot sequencing only (see docs/architecture.md).
- * Credential/mailbox storage, authorization, and the development CLI are
- * implemented in their own storage/cli modules starting with later AWPs;
- * none of that protocol or platform behavior belongs here.
+ * Authorization and the development CLI are implemented in their own
+ * modules starting with later AWPs; none of that protocol or platform
+ * behavior belongs here. Credential/trust persistence (AWP3) is
+ * initialized here because it must run its boot-time transaction-journal
+ * recovery before the NFC transport starts (a session must never observe
+ * a half-committed credential record).
  */
 int main(void)
 {
 	LOG_INF("Aliro NFC User Device");
+
+	const AliroError credentialError = AliroUd::Credential::Store::Init();
+	if (credentialError != ALIRO_NO_ERROR) {
+		LOG_ERR("Credential store initialization failed: %d", credentialError.ToInt());
+		AliroUd::AppStatus::SetInitState(AliroUd::AppStatus::InitState::StackInitFailed);
+		return 0;
+	}
 
 	const AliroError err = Aliro::UserDeviceStack::Instance().Init();
 

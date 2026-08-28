@@ -4,122 +4,108 @@
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
 
+#include "credential_store.h"
+#include "provisioning.h"
+
 #include <zephyr/logging/log.h>
 
 #include <aliro/user_device/interface.h>
 
 /*
- * Placeholder implementation of Aliro::Interface::UserDevice::Credential and
- * ::Trust, added only so the application links against the currently
- * checked-out stack (ncs-aliro WP5 introduces CredentialManager, which calls
- * into these contracts unconditionally). No credential/trust persistence
- * exists yet: every credential-set behaves as empty and every trust lookup
- * behaves as "not provisioned". Real Zephyr settings/NVS-backed storage,
- * per-binding trust, and the persistent transaction journal are implemented
- * in AWP3 (APP_PLAN.md); do not add real persistence here.
+ * Thin adapter from Aliro::Interface::UserDevice::Credential/::Trust to
+ * this application's own credential_store (APP_PLAN.md AWP3). Every
+ * function here does exactly two things: translate the wire
+ * `ConstData provisioningInput` to/from `Provisioning::Payload`, and call
+ * into `AliroUd::Credential::Store`. No storage, trust, or transaction
+ * logic lives in this file; see credential_store.cpp for that.
  */
-LOG_MODULE_REGISTER(aliro_ud_credential, LOG_LEVEL_WRN);
+LOG_MODULE_DECLARE(aliro_ud_credential, CONFIG_ALIRO_UD_CREDENTIAL_LOG_LEVEL);
 
 namespace Aliro::Interface::UserDevice::Credential {
 
 AliroError Validate(ConstData provisioningInput)
 {
-	ARG_UNUSED(provisioningInput);
-	LOG_WRN("Credential::Validate() stub: no credential backend yet (AWP3)");
-	return ALIRO_ERROR_NOT_IMPLEMENTED;
+	AliroUd::Credential::Provisioning::Payload payload{};
+
+	if (!AliroUd::Credential::Provisioning::Parse(provisioningInput, payload)) {
+		return ALIRO_INVALID_DATA_FORMAT;
+	}
+
+	return AliroUd::Credential::Store::Validate(payload);
 }
 
 AliroError Create(ConstData provisioningInput, ::Aliro::UserDevice::CredentialHandle &outHandle)
 {
-	ARG_UNUSED(provisioningInput);
 	outHandle = ::Aliro::UserDevice::kInvalidCredentialHandle;
-	LOG_WRN("Credential::Create() stub: no credential backend yet (AWP3)");
-	return ALIRO_ERROR_NOT_IMPLEMENTED;
+
+	AliroUd::Credential::Provisioning::Payload payload{};
+	if (!AliroUd::Credential::Provisioning::Parse(provisioningInput, payload)) {
+		return ALIRO_INVALID_DATA_FORMAT;
+	}
+
+	return AliroUd::Credential::Store::Create(payload, outHandle);
 }
 
 AliroError Update(::Aliro::UserDevice::CredentialHandle handle, ConstData provisioningInput)
 {
-	ARG_UNUSED(handle);
-	ARG_UNUSED(provisioningInput);
-	LOG_WRN("Credential::Update() stub: no credential backend yet (AWP3)");
-	return ALIRO_ERROR_NOT_IMPLEMENTED;
+	AliroUd::Credential::Provisioning::Payload payload{};
+	if (!AliroUd::Credential::Provisioning::Parse(provisioningInput, payload)) {
+		return ALIRO_INVALID_DATA_FORMAT;
+	}
+
+	return AliroUd::Credential::Store::Update(handle, payload);
 }
 
 AliroError Delete(::Aliro::UserDevice::CredentialHandle handle)
 {
-	ARG_UNUSED(handle);
-	LOG_WRN("Credential::Delete() stub: no credential backend yet (AWP3)");
-	return ALIRO_ERROR_NOT_IMPLEMENTED;
+	return AliroUd::Credential::Store::Delete(handle);
 }
 
 AliroError Reset()
 {
-	LOG_WRN("Credential::Reset() stub: no credential backend yet (AWP3)");
-	return ALIRO_ERROR_NOT_IMPLEMENTED;
+	return AliroUd::Credential::Store::Reset();
 }
 
-size_t GetGroupBindingCount(::Aliro::UserDevice::CredentialHandle handle)
+AliroError GetGroupBindingCount(::Aliro::UserDevice::CredentialHandle handle, size_t &outCount)
 {
-	ARG_UNUSED(handle);
-	return 0;
+	return AliroUd::Credential::Store::GetGroupBindingCount(handle, outCount);
 }
 
 AliroError GetGroupBinding(::Aliro::UserDevice::CredentialHandle handle, size_t index,
-			   ReaderGroupIdentifier &outReaderGroupIdentifier)
+			   ::Aliro::UserDevice::ReaderGroupIdentifier &outReaderGroupIdentifier)
 {
-	ARG_UNUSED(handle);
-	ARG_UNUSED(index);
-	ARG_UNUSED(outReaderGroupIdentifier);
-	return ALIRO_ERROR_NOT_IMPLEMENTED;
+	return AliroUd::Credential::Store::GetGroupBinding(handle, index, outReaderGroupIdentifier);
 }
 
-AliroError ResolveByReaderGroupIdentifier(const ReaderGroupIdentifier &readerGroupIdentifier,
+AliroError ResolveByReaderGroupIdentifier(const ::Aliro::UserDevice::ReaderGroupIdentifier &readerGroupIdentifier,
 					  ::Aliro::UserDevice::CredentialHandle *outHandles, size_t &inOutCount)
 {
-	/*
-	 * No credential is provisioned yet: zero matches is a well-defined,
-	 * successful outcome per this contract's own documentation ("ALIRO_NO_ERROR
-	 * on success (including zero matches)"), and lets
-	 * CredentialManager::EvaluateAuth0() resolve to Auth0Outcome::kNoMatch
-	 * cleanly rather than treating an unimplemented backend as a failure.
-	 */
-	ARG_UNUSED(readerGroupIdentifier);
-	ARG_UNUSED(outHandles);
-	inOutCount = 0;
-	return ALIRO_NO_ERROR;
+	return AliroUd::Credential::Store::ResolveByReaderGroupIdentifier(readerGroupIdentifier, outHandles,
+									  inOutCount);
 }
 
 AliroError GetMetadata(::Aliro::UserDevice::CredentialHandle handle,
 		       ::Aliro::UserDevice::CredentialMetadata &outMetadata)
 {
-	/*
-	 * Unreachable in practice today: ResolveByReaderGroupIdentifier()
-	 * above never yields a valid handle, so no caller currently reaches
-	 * this with anything but an invalid handle. Kept as a real stub
-	 * (rather than omitted) so any future caller fails loudly and
-	 * deterministically instead of linking against a missing symbol.
-	 */
-	ARG_UNUSED(handle);
-	outMetadata = ::Aliro::UserDevice::CredentialMetadata{};
-	return ALIRO_ERROR_NOT_IMPLEMENTED;
+	return AliroUd::Credential::Store::GetMetadata(handle, outMetadata);
 }
 
 } // namespace Aliro::Interface::UserDevice::Credential
 
 namespace Aliro::Interface::UserDevice::Trust {
 
-AliroError GetReaderPublicKey(::Aliro::UserDevice::CredentialHandle handle, CryptoTypes::PublicKey &outPublicKey)
+AliroError GetReaderPublicKey(::Aliro::UserDevice::CredentialHandle handle,
+			      const ::Aliro::UserDevice::ReaderGroupIdentifier &readerGroupIdentifier,
+			      CryptoTypes::PublicKey &outPublicKey)
 {
-	ARG_UNUSED(handle);
-	outPublicKey = CryptoTypes::PublicKey{};
-	return ALIRO_PUBLIC_KEY_NOT_FOUND;
+	return AliroUd::Credential::Store::GetReaderPublicKey(handle, readerGroupIdentifier, outPublicKey);
 }
 
-AliroError GetReaderIssuerPublicKey(::Aliro::UserDevice::CredentialHandle handle, CryptoTypes::PublicKey &outPublicKey)
+AliroError GetReaderIssuerPublicKey(::Aliro::UserDevice::CredentialHandle handle,
+				    const ::Aliro::UserDevice::ReaderGroupIdentifier &readerGroupIdentifier,
+				    CryptoTypes::PublicKey &outPublicKey)
 {
-	ARG_UNUSED(handle);
-	outPublicKey = CryptoTypes::PublicKey{};
-	return ALIRO_PUBLIC_KEY_NOT_FOUND;
+	return AliroUd::Credential::Store::GetReaderIssuerPublicKey(handle, readerGroupIdentifier, outPublicKey);
 }
 
 } // namespace Aliro::Interface::UserDevice::Trust

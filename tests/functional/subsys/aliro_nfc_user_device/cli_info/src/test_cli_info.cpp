@@ -17,11 +17,15 @@
 #include <string>
 
 /**
- * @brief Exercises the "aliro-ud" development CLI (APP_PLAN.md AWP2)
+ * @brief Exercises the "aliro-ud" development CLI (APP_PLAN.md AWP2/AWP3)
  * through Zephyr's dummy shell backend, in front of the real
  * `platform/nfc`/`platform/os` code and the real Aliro `UserDeviceStack`
  * (same substitution as `worker_lifecycle`: only the hardware-dependent
- * `nfc_transport.cpp` is replaced by a fake).
+ * `nfc_transport.cpp` is replaced by a fake). Credential persistence uses
+ * the in-memory fakes from `tests/.../common/` rather than real flash/PSA
+ * storage, but `fake_key_backend.cpp` performs real PSA volatile crypto so
+ * the private-key scalar validation exercised here is cryptographically
+ * real.
  */
 namespace {
 
@@ -107,15 +111,13 @@ ZTEST(aliro_ud_cli_info, test_info_reflects_live_session_state)
 }
 
 /**
- * @brief Credential staging shells are registered and syntactically usable
- * (APP_PLAN.md AWP2), but every one returns a deterministic "ERR
- * NOT_IMPLEMENTED" line: AWP3 supplies their storage behavior.
+ * @brief A staging transaction with no `begin-create`/`begin-update` open
+ * is rejected deterministically (APP_PLAN.md AWP3): every setter and
+ * `commit` require an active transaction, and `abort` requires one too.
  */
-ZTEST(aliro_ud_cli_info, test_credential_shells_are_not_yet_implemented)
+ZTEST(aliro_ud_cli_info, test_credential_setters_require_open_transaction)
 {
 	static const char *const kCommands[]{
-		"aliro-ud credential begin-create",
-		"aliro-ud credential begin-update 1",
 		"aliro-ud credential set-key 00",
 		"aliro-ud credential set-binding 0 00 direct 00",
 		"aliro-ud credential set-policy 1",
@@ -128,7 +130,59 @@ ZTEST(aliro_ud_cli_info, test_credential_shells_are_not_yet_implemented)
 
 	for (const char *cmd : kCommands) {
 		const std::string output{ RunCommand(cmd) };
-		zassert_true(output.find("ERR NOT_IMPLEMENTED") != std::string::npos,
-			     "expected 'ERR NOT_IMPLEMENTED' for '%s', got: %s", cmd, output.c_str());
+		zassert_true(output.find("ERR NO_TRANSACTION") != std::string::npos,
+			     "expected 'ERR NO_TRANSACTION' for '%s', got: %s", cmd, output.c_str());
 	}
+}
+
+/**
+ * @brief End-to-end staging transaction (APP_PLAN.md AWP3): `begin-create`,
+ * a full set of setters, and `commit` persist a real Access Credential
+ * whose non-secret metadata is then visible through `inspect`/`list`, and
+ * `delete` removes it again.
+ */
+ZTEST(aliro_ud_cli_info, test_credential_staging_transaction_commits)
+{
+	/* An arbitrary valid (nonzero, below the P-256 curve order) private key scalar. */
+	static const char *const kKeyHex{ "23231022a3662ceb6f2e6a4e998866ae88d6e9da1c72b050ae5c206a1da46712" };
+	static const char *const kReaderGroupIdentifierHex{ "0102030405060708090a0b0c0d0e0f10" };
+	static const char *const kTrustAnchorKeyHex{
+		"04"
+		"1111111111111111111111111111111111111111111111111111111111111111"
+		"2222222222222222222222222222222222222222222222222222222222222222"
+	};
+
+	zassert_true(RunCommand("aliro-ud credential begin-create").find("OK") != std::string::npos,
+		     "begin-create should succeed");
+	zassert_true(RunCommand((std::string("aliro-ud credential set-key ") + kKeyHex).c_str()).find("OK") !=
+			     std::string::npos,
+		     "set-key should accept a valid P-256 scalar");
+	zassert_true(RunCommand("aliro-ud credential set-policy 1").find("OK") != std::string::npos,
+		     "set-policy should succeed");
+	zassert_true(RunCommand((std::string("aliro-ud credential set-binding 0 ") + kReaderGroupIdentifierHex +
+				  " direct " + kTrustAnchorKeyHex)
+					 .c_str())
+			     .find("OK") != std::string::npos,
+		     "set-binding should succeed");
+
+	const std::string commitOutput{ RunCommand("aliro-ud credential commit") };
+	zassert_true(commitOutput.find("OK handle=") != std::string::npos, "expected 'OK handle=', got: %s",
+		     commitOutput.c_str());
+
+	const std::string inspectOutput{ RunCommand("aliro-ud credential inspect 1") };
+	zassert_true(inspectOutput.find("OK handle=1") != std::string::npos, "expected handle=1, got: %s",
+		     inspectOutput.c_str());
+	zassert_true(inspectOutput.find("bindings=1") != std::string::npos, "expected bindings=1, got: %s",
+		     inspectOutput.c_str());
+
+	const std::string listOutput{ RunCommand("aliro-ud credential list") };
+	zassert_true(listOutput.find("OK count=1") != std::string::npos, "expected count=1, got: %s",
+		     listOutput.c_str());
+
+	zassert_true(RunCommand("aliro-ud credential delete 1").find("OK") != std::string::npos,
+		     "delete should succeed");
+
+	const std::string listAfterDelete{ RunCommand("aliro-ud credential list") };
+	zassert_true(listAfterDelete.find("OK count=0") != std::string::npos, "expected count=0, got: %s",
+		     listAfterDelete.c_str());
 }

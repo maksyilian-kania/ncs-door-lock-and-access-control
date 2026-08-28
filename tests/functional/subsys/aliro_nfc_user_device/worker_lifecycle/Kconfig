@@ -12,5 +12,6 @@ mainmenu "Aliro NFC User Device - Worker Lifecycle Test"
 # reference, normally sourced via the application's own Kconfig.
 rsource "../../../../../applications/aliro-nfc-user-device/src/platform/nfc/Kconfig"
 rsource "../../../../../applications/aliro-nfc-user-device/src/platform/os/Kconfig"
+rsource "../../../../../applications/aliro-nfc-user-device/src/storage/credential/Kconfig"
 
 source "Kconfig.zephyr"

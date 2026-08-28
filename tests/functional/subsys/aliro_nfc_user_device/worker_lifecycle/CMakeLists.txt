@@ -11,8 +11,9 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(aliro_nfc_user_device_worker_lifecycle)
 
 set(ALIRO_UD_APP_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../applications/aliro-nfc-user-device/src)
+set(ALIRO_UD_TEST_COMMON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../common)
 
-target_include_directories(app PRIVATE ${ALIRO_UD_APP_SRC_DIR})
+target_include_directories(app PRIVATE ${ALIRO_UD_APP_SRC_DIR} ${ALIRO_UD_TEST_COMMON_DIR})
 
 # Real platform/nfc worker (bounded queue + dedicated thread) and platform/os
 # (mutex, timer, deferred-event queue, logging) code under test, built
@@ -28,12 +29,18 @@ target_sources(app PRIVATE
   ${ALIRO_UD_APP_SRC_DIR}/platform/os/os_queue.cpp
   ${ALIRO_UD_APP_SRC_DIR}/platform/os/os_trusted_time.cpp
   ${ALIRO_UD_APP_SRC_DIR}/platform/os/os_logging.cpp
-  # Aliro::Interface::UserDevice::Credential/Trust/Authorization placeholder
-  # stubs (AWP3/AWP4 own the real implementations); the real
-  # Aliro::UserDeviceStack pulled in below now calls into these
-  # unconditionally (ncs-aliro WP5's CredentialManager::EvaluateAuth0()), so
-  # this test needs the same stubs shipped with the application.
+  ${ALIRO_UD_APP_SRC_DIR}/platform/os/transaction.cpp
+  # Aliro::Interface::UserDevice::Credential/Trust adapter (AWP3) and its
+  # real credential_store.cpp engine; the real Aliro::UserDeviceStack pulled
+  # in below calls into these unconditionally (ncs-aliro WP5's
+  # CredentialManager::EvaluateAuth0()). credential_persistence_settings.cpp
+  # and key_backend_psa.cpp are swapped for in-memory fakes (native_sim has
+  # no hardware-backed flash/trusted storage); see
+  # tests/functional/subsys/aliro_nfc_user_device/common/.
   ${ALIRO_UD_APP_SRC_DIR}/storage/credential/credential.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/storage/credential/credential_store.cpp
+  ${ALIRO_UD_TEST_COMMON_DIR}/fake_credential_persistence.cpp
+  ${ALIRO_UD_TEST_COMMON_DIR}/fake_key_backend.cpp
   ${ALIRO_UD_APP_SRC_DIR}/platform/authorization/authorization.cpp
   src/fake_nfc_interface.cpp
   src/test_worker_lifecycle.cpp

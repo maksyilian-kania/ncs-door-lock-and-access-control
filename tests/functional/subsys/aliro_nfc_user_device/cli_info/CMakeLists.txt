@@ -12,8 +12,9 @@ project(aliro_nfc_user_device_cli_info)
 
 set(ALIRO_UD_APP_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../applications/aliro-nfc-user-device/src)
 set(ALIRO_UD_WORKER_LIFECYCLE_TEST_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../worker_lifecycle/src)
+set(ALIRO_UD_TEST_COMMON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../common)
 
-target_include_directories(app PRIVATE ${ALIRO_UD_APP_SRC_DIR})
+target_include_directories(app PRIVATE ${ALIRO_UD_APP_SRC_DIR} ${ALIRO_UD_TEST_COMMON_DIR})
 
 # Real cli.cpp under test (APP_PLAN.md AWP2), plus the real platform/nfc and
 # platform/os code it reads state from ("info") and the real Aliro
@@ -29,10 +30,15 @@ target_sources(app PRIVATE
   ${ALIRO_UD_APP_SRC_DIR}/platform/os/os_trusted_time.cpp
   ${ALIRO_UD_APP_SRC_DIR}/platform/os/os_logging.cpp
   ${ALIRO_UD_APP_SRC_DIR}/platform/os/app_status.cpp
-  # Aliro::Interface::UserDevice::Credential/Trust/Authorization placeholder
-  # stubs (AWP3/AWP4 own the real implementations); see
-  # applications/aliro-nfc-user-device/src/storage/credential/credential.cpp.
+  ${ALIRO_UD_APP_SRC_DIR}/platform/os/transaction.cpp
+  # Aliro::Interface::UserDevice::Credential/Trust adapter (AWP3) and its
+  # real credential_store.cpp engine, with in-memory fakes standing in for
+  # the hardware-backed persistence/key backends (native_sim has neither);
+  # see tests/functional/subsys/aliro_nfc_user_device/common/.
   ${ALIRO_UD_APP_SRC_DIR}/storage/credential/credential.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/storage/credential/credential_store.cpp
+  ${ALIRO_UD_TEST_COMMON_DIR}/fake_credential_persistence.cpp
+  ${ALIRO_UD_TEST_COMMON_DIR}/fake_key_backend.cpp
   ${ALIRO_UD_APP_SRC_DIR}/platform/authorization/authorization.cpp
   ${ALIRO_UD_WORKER_LIFECYCLE_TEST_SRC_DIR}/fake_nfc_interface.cpp
   src/test_cli_info.cpp

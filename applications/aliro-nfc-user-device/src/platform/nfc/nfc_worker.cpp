@@ -71,6 +71,19 @@ std::atomic<FieldIntent> sPendingField{ FieldIntent::None };
 std::atomic<bool> sForceRecoveryRequested{ false };
 K_SEM_DEFINE(sLifecycleSem, 0, 1);
 
+/*
+ * Maintenance pause (APP_PLAN.md AWP3 lifecycle coordinator): while
+ * `sActivationAllowed` is false, HandleFieldOn() below never calls
+ * ActivateSession(), no matter how the worker's drain loop happens to
+ * interleave a pending FIELD_ON with the pause request itself. Checked
+ * from any thread by EnterMaintenancePause(); only ever written from
+ * EnterMaintenancePause()/ExitMaintenancePause() (never concurrently, by
+ * construction: RunMutation() serializes mutations).
+ */
+std::atomic<bool> sActivationAllowed{ true };
+std::atomic<bool> sPauseRequested{ false };
+K_SEM_DEFINE(sPauseAck, 0, 1);
+
 K_THREAD_STACK_DEFINE(sWorkerStackArea, CONFIG_ALIRO_UD_NFC_THREAD_STACK_SIZE);
 k_thread sWorkerThread{};
 
@@ -99,6 +112,11 @@ void HandleFieldOn()
 
 	if (sSessionActive) {
 		LOG_INF("FIELD_ON: already active, ignored");
+		return;
+	}
+
+	if (!sActivationAllowed.load(std::memory_order_relaxed)) {
+		LOG_INF("FIELD_ON ignored: NFC activation paused for maintenance");
 		return;
 	}
 
@@ -154,9 +172,34 @@ void HandleForcedRecovery()
 	LOG_INF("STACK_TERMINATION: active -> inactive (forced recovery)");
 }
 
-/** @brief Drains the coalesced lifecycle channel: forced recovery first, then the latest pending field intent. */
+/*
+ * Terminates any active session (if one exists) and acknowledges the pause
+ * request; HandleFieldOn()'s own sActivationAllowed check is what actually
+ * prevents a still-pending/racing FIELD_ON from reactivating one, not the
+ * ordering of this function relative to DrainPendingLifecycle()'s other
+ * branches.
+ */
+void HandlePauseRequest()
+{
+	if (sSessionActive) {
+		LOG_INF("Maintenance pause: terminating active session");
+		const auto handle = ConnectionHandle::Nfc();
+		sExpectingOwnTermination = true;
+		Aliro::UserDeviceStack::Instance().DeactivateSession(handle);
+		sExpectingOwnTermination = false;
+		sSessionActive = false;
+	}
+
+	k_sem_give(&sPauseAck);
+}
+
+/** @brief Drains the coalesced lifecycle channel: pause request, then forced recovery, then the latest field intent. */
 void DrainPendingLifecycle()
 {
+	if (sPauseRequested.exchange(false, std::memory_order_relaxed)) {
+		HandlePauseRequest();
+	}
+
 	if (sForceRecoveryRequested.exchange(false, std::memory_order_relaxed)) {
 		HandleForcedRecovery();
 	}
@@ -295,6 +338,19 @@ void NotifySessionTerminated()
 		 */
 		LOG_INF("STACK_TERMINATION: active -> inactive");
 	}
+}
+
+void EnterMaintenancePause()
+{
+	sActivationAllowed.store(false, std::memory_order_relaxed);
+	sPauseRequested.store(true, std::memory_order_relaxed);
+	k_sem_give(&sLifecycleSem);
+	k_sem_take(&sPauseAck, K_FOREVER);
+}
+
+void ExitMaintenancePause()
+{
+	sActivationAllowed.store(true, std::memory_order_relaxed);
 }
 
 bool IsSessionActive()

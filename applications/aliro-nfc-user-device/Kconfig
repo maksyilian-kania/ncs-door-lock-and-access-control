@@ -13,5 +13,8 @@ module-help = Enables Aliro NFC User Device application log messages.
 source "$(ZEPHYR_BASE)/subsys/logging/Kconfig.template.log_config"
 
 rsource "src/platform/Kconfig"
+rsource "src/storage/credential/Kconfig"
+
+rsource "Kconfig.defconfig"
 
 source "Kconfig.zephyr"
