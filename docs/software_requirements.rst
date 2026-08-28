@@ -46,6 +46,9 @@ Prepare the environment:
 #. (Optional) Add the QM35 SDK repository to your workspace.
    See the :ref:`aliro_qm35_sdk_repository` section for more information.
 
+#. (Optional) Add the nRF Edge AI SDK repository to your workspace.
+   See the :ref:`edge_ai_sdk_repository` section for more information.
+
 #. Use the following command to clone the project repository and all of its submodules:
 
    .. code-block:: console
@@ -112,6 +115,30 @@ For example:
    west config manifest.group-filter -- "+qm35-aliro-sdk,+group1,+group2,+group3"
 
 Before the first use of the QM35 hardware, make sure you have the correct firmware programmed on the coprocessor module (see :ref:`flashing_qm35_using_nrf53_dk`).
+
+.. _edge_ai_sdk_repository:
+
+nRF Edge AI SDK repository
+**************************
+
+The |REPO_NAME| integrates gesture-based access control using an SPI camera and on-device inference.
+This support uses the Nordic Axon NPU driver from the `sdk-edge-ai <sdk-edge-ai_>`_ repository (cloned into the :file:`edge-ai` directory).
+If you are building with the ``gesture_access`` snippet, add the repository to your workspace before running ``west update``.
+To do that, execute the following command:
+
+.. code-block:: bash
+
+   west config manifest.group-filter -- "+sdk-edge-ai"
+
+If you are using more group filters in your application, you need to pass them all to the ``west config manifest.group-filter`` command using comma-separated values.
+For example, to enable both QM35 UWB and gesture access:
+
+.. code-block:: bash
+
+   west config manifest.group-filter -- "+qm35-aliro-sdk,+sdk-edge-ai"
+
+You only need to configure the group filter once per west workspace.
+After changing the group filter, run ``west update`` again so that the :file:`edge-ai` repository is fetched.
 
 Aliro Certification Tool
 ************************
