@@ -77,4 +77,28 @@ bool IsKeyPresent(::Aliro::CryptoTypes::KeyId keyId);
  */
 AliroError GetPublicKey(::Aliro::CryptoTypes::KeyId keyId, ::Aliro::CryptoTypes::PublicKey &outPublicKey);
 
+/**
+ * @brief Signs exact data with an already-imported private key, referenced
+ * only by its opaque (application-facing) key ID (APP_PLAN.md AWP5,
+ * `Aliro::Interface::UserDevice::CredentialSigning::Sign()`).
+ *
+ * Only this backend translates the application-facing `keyId` to whatever
+ * PSA key handle actually holds the key material (the fake host backend
+ * maps it to an internal volatile ID; see `key_backend.h`'s class comment);
+ * callers outside `storage/credential` must never assume `keyId` is itself
+ * a usable PSA key handle.
+ *
+ * @param keyId The application-facing key identifier (e.g.
+ * `PersistedCredential::mKeyId`) previously returned by
+ * `ImportPrivateKeyScalar()`.
+ * @param data The exact bytes to sign.
+ * @param dataLength The length of `data`.
+ * @param outSignature The 64-byte `r || s` ECDSA P-256/SHA-256 signature.
+ *
+ * @return ALIRO_NO_ERROR on success, error code otherwise (including an
+ * unknown `keyId`).
+ */
+AliroError Sign(::Aliro::CryptoTypes::KeyId keyId, const uint8_t *data, size_t dataLength,
+		::Aliro::CryptoTypes::Signature &outSignature);
+
 } // namespace AliroUd::Credential::KeyBackend

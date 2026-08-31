@@ -1,0 +1,48 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+menu "Crypto (AWP5)"
+
+config ALIRO_UD_CRYPTO
+	bool
+	default y
+	# GenerateRandom (crypto.cpp).
+	select PSA_WANT_GENERATE_RANDOM
+	# GenerateEphemeralKeyPair / RawKeyAgreement (crypto.cpp): ephemeral
+	# ECDH P-256 key pairs, never persisted.
+	select PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_GENERATE
+	select PSA_WANT_ECC_SECP_R1_256
+	select PSA_WANT_ALG_ECDH
+	# DeriveSymmetricKey / DeriveRawKey (crypto.cpp): HKDF-HMAC-SHA-256.
+	select PSA_WANT_ALG_HKDF
+	select PSA_WANT_ALG_HMAC
+	select PSA_WANT_KEY_TYPE_HMAC
+	# AeadEncrypt / AeadDecrypt (crypto.cpp): AES-GCM.
+	select PSA_WANT_ALG_GCM
+	select PSA_WANT_KEY_TYPE_AES
+	# VerifySignature (crypto.cpp) and certificate.cpp's reconstructed-TBS
+	# signature check: ECDSA-P256/SHA-256 verification against an
+	# imported (not generated/stored) public key.
+	select PSA_WANT_KEY_TYPE_ECC_PUBLIC_KEY
+	select PSA_WANT_ALG_ECDSA
+	# Sha256 (crypto.cpp) and the HKDF/ECDSA hash above.
+	select PSA_WANT_ALG_SHA_256
+	# certificate.cpp: authorityKeyIdentifier = SHA-1(issuerPublicKey),
+	# per Aliro 1.0 Specification and Test Plan section 8.3.3.4.2 (RFC5280
+	# method 1). SHA-1 is used only for this non-cryptographic-identifier
+	# purpose, never for a security decision.
+	select PSA_WANT_ALG_SHA_1
+	help
+	  Aliro::Interface::UserDevice::Crypto and CredentialSigning PSA
+	  Crypto algorithm/key-type requirements (APP_PLAN.md AWP5).
+
+module = ALIRO_UD_CRYPTO
+module-str = ALIRO_UD_CRYPTO
+module-dep = LOG
+module-help = Enables Aliro NFC User Device crypto/certificate log messages.
+source "$(ZEPHYR_BASE)/subsys/logging/Kconfig.template.log_config"
+
+endmenu # Crypto (AWP5)

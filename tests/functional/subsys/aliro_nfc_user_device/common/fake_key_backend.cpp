@@ -162,4 +162,22 @@ AliroError GetPublicKey(CryptoTypes::KeyId keyId, CryptoTypes::PublicKey &outPub
 	return ALIRO_NO_ERROR;
 }
 
+AliroError Sign(CryptoTypes::KeyId keyId, const uint8_t *data, size_t dataLength,
+		CryptoTypes::Signature &outSignature)
+{
+	auto *mapping = Test::Find(keyId);
+	if (mapping == nullptr || data == nullptr || dataLength == 0) {
+		return ALIRO_INVALID_ARGUMENT;
+	}
+
+	size_t outLen{};
+	const psa_status_t status = psa_sign_message(mapping->mVolatileId, PSA_ALG_ECDSA(PSA_ALG_SHA_256), data,
+						      dataLength, outSignature.data(), outSignature.size(), &outLen);
+	if (status != PSA_SUCCESS || outLen != outSignature.size()) {
+		return ALIRO_ERROR_INTERNAL;
+	}
+
+	return ALIRO_NO_ERROR;
+}
+
 } // namespace AliroUd::Credential::KeyBackend

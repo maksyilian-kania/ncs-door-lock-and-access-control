@@ -126,4 +126,23 @@ AliroError GetPublicKey(::Aliro::CryptoTypes::KeyId keyId, ::Aliro::CryptoTypes:
 	return ALIRO_NO_ERROR;
 }
 
+AliroError Sign(::Aliro::CryptoTypes::KeyId keyId, const uint8_t *data, size_t dataLength,
+		::Aliro::CryptoTypes::Signature &outSignature)
+{
+	if (data == nullptr || dataLength == 0) {
+		return ALIRO_INVALID_ARGUMENT;
+	}
+
+	size_t outLen{};
+	const psa_status_t status = psa_sign_message(keyId, PSA_ALG_ECDSA(PSA_ALG_SHA_256), data, dataLength,
+						      outSignature.data(), outSignature.size(), &outLen);
+
+	if (status != PSA_SUCCESS || outLen != outSignature.size()) {
+		LOG_ERR("psa_sign_message(0x%08x) failed: %d", keyId, status);
+		return ALIRO_ERROR_INTERNAL;
+	}
+
+	return ALIRO_NO_ERROR;
+}
+
 } // namespace AliroUd::Credential::KeyBackend
