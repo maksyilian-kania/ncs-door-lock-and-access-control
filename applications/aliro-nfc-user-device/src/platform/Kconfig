@@ -6,3 +6,4 @@
 
 rsource "nfc/Kconfig"
 rsource "os/Kconfig"
+rsource "authorization/Kconfig"

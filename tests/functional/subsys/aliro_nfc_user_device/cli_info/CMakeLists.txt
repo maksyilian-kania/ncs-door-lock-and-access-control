@@ -39,7 +39,11 @@ target_sources(app PRIVATE
   ${ALIRO_UD_APP_SRC_DIR}/storage/credential/credential_store.cpp
   ${ALIRO_UD_TEST_COMMON_DIR}/fake_credential_persistence.cpp
   ${ALIRO_UD_TEST_COMMON_DIR}/fake_key_backend.cpp
+  # Aliro::Interface::UserDevice::Authorization adapter (AWP4), same
+  # real-window/fake-indicator split as worker_lifecycle.
   ${ALIRO_UD_APP_SRC_DIR}/platform/authorization/authorization.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/platform/authorization/authorization_window.cpp
+  ${ALIRO_UD_TEST_COMMON_DIR}/fake_authorization_indicator.cpp
   ${ALIRO_UD_WORKER_LIFECYCLE_TEST_SRC_DIR}/fake_nfc_interface.cpp
   src/test_cli_info.cpp
 )

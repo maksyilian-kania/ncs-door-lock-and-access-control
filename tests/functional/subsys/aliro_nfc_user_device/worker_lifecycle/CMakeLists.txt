@@ -41,7 +41,13 @@ target_sources(app PRIVATE
   ${ALIRO_UD_APP_SRC_DIR}/storage/credential/credential_store.cpp
   ${ALIRO_UD_TEST_COMMON_DIR}/fake_credential_persistence.cpp
   ${ALIRO_UD_TEST_COMMON_DIR}/fake_key_backend.cpp
+  # Aliro::Interface::UserDevice::Authorization adapter (AWP4) and its real
+  # authorization_window.cpp state machine; authorization_button.cpp/
+  # authorization_led.cpp (DK-hardware-only GPIO) are excluded, substituted
+  # by fake_authorization_indicator.cpp.
   ${ALIRO_UD_APP_SRC_DIR}/platform/authorization/authorization.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/platform/authorization/authorization_window.cpp
+  ${ALIRO_UD_TEST_COMMON_DIR}/fake_authorization_indicator.cpp
   src/fake_nfc_interface.cpp
   src/test_worker_lifecycle.cpp
 )

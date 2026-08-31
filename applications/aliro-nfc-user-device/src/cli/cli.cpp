@@ -5,17 +5,21 @@
  */
 
 #include <app_version.h>
+#include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/iterable_sections.h>
 #include <zephyr/sys/util.h>
 
 #include "lifecycle/lifecycle.h"
+#include "platform/authorization/authorization_indicator.h"
+#include "platform/authorization/authorization_window.h"
 #include "platform/nfc/nfc_worker.h"
 #include "platform/os/app_status.h"
 #include "storage/credential/credential_store.h"
 #include "storage/credential/credential_types.h"
 #include "storage/credential/provisioning.h"
 
+#include <aliro/user_device/interface.h>
 #include <aliro/user_device/user_device.h>
 
 #include <cstdlib>
@@ -105,6 +109,71 @@ int CmdInfo(const struct shell *sh, size_t argc, char **argv)
 		    APP_VERSION_EXTENDED_STRING, AliroUd::AppStatus::ToString(AliroUd::AppStatus::GetInitState()),
 		    AliroUd::Nfc::IsSessionActive() ? 1U : 0U, AliroUd::Nfc::GetActivationAttemptCount(),
 		    AliroUd::Nfc::GetRejectedApduCount());
+	return 0;
+}
+
+/*
+ * "aliro-ud auth" (APP_PLAN.md AWP4): read-only status plus a test trigger
+ * that opens the button authorization window without physical DK hardware,
+ * for host tests and development ("Provide an application test trigger if
+ * the current stack cannot request authorization end to end").
+ */
+int CmdAuthStatus(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	const int64_t now = k_uptime_get();
+	const auto state = AliroUd::Authorization::GlobalWindow().GetState(now);
+	const bool authorized = state == ::Aliro::UserDevice::AuthorizationState::Authorized;
+
+	shell_print(sh, "OK state=%s remaining_ms=%lld", authorized ? "authorized" : "required",
+		    static_cast<long long>(AliroUd::Authorization::GlobalWindow().GetRemainingMs(now)));
+	return 0;
+}
+
+int CmdAuthPress(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	AliroUd::Authorization::GlobalWindow().Open(
+		k_uptime_get(), static_cast<uint32_t>(CONFIG_ALIRO_UD_AUTHORIZATION_WINDOW_SECONDS) * 1000U);
+	AliroUd::Authorization::Indicator::SetActive(false);
+
+	shell_print(sh, "OK");
+	return 0;
+}
+
+int CmdAuthClear(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	AliroUd::Authorization::GlobalWindow().Close();
+
+	shell_print(sh, "OK");
+	return 0;
+}
+
+/*
+ * Test trigger for the other half of the Authorization contract
+ * (APP_PLAN.md AWP4's "Provide an application test trigger if the current
+ * stack cannot request authorization end to end"): calls the same
+ * `Aliro::Interface::UserDevice::Authorization::NotifyAuthenticationRequired()`
+ * the real stack calls when an AUTH0 policy 1-3 credential is used with no
+ * valid button window, without needing a physical NFC reader tapping the
+ * DK. Drives the same visible LED indication path.
+ */
+int CmdAuthNotifyRequired(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	::Aliro::Interface::UserDevice::Authorization::NotifyAuthenticationRequired(
+		::Aliro::UserDevice::kInvalidCredentialHandle);
+
+	shell_print(sh, "OK");
 	return 0;
 }
 
@@ -632,9 +701,24 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 	SHELL_SUBCMD_SET_END);
 
 SHELL_STATIC_SUBCMD_SET_CREATE(
+	sub_auth,
+	SHELL_CMD_ARG(status, NULL, "Report the current button authorization window state.", CmdAuthStatus, 1, 0),
+	SHELL_CMD_ARG(press, NULL,
+		      "Test trigger: open the authorization window as if the DK button were pressed.",
+		      CmdAuthPress, 1, 0),
+	SHELL_CMD_ARG(clear, NULL, "Test trigger: immediately close the authorization window.", CmdAuthClear, 1,
+		      0),
+	SHELL_CMD_ARG(notify-required, NULL,
+		      "Test trigger: invoke NotifyAuthenticationRequired() as the stack would for an "
+		      "AUTH0 policy 1-3 credential with no valid window (lights the LED).",
+		      CmdAuthNotifyRequired, 1, 0),
+	SHELL_SUBCMD_SET_END);
+
+SHELL_STATIC_SUBCMD_SET_CREATE(
 	sub_aliro_ud,
 	SHELL_CMD_ARG(info, NULL, "Report non-secret build/initialization/session state.", CmdInfo, 1, 0),
 	SHELL_CMD(credential, &sub_credential, "Access Credential provisioning/staging commands (AWP3).", NULL),
+	SHELL_CMD(auth, &sub_auth, "Button authorization window status/test-trigger commands (AWP4).", NULL),
 	SHELL_SUBCMD_SET_END);
 
 /*

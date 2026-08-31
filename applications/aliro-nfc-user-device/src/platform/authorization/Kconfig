@@ -1,0 +1,25 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+menu "Authorization"
+
+config ALIRO_UD_AUTHORIZATION_WINDOW_SECONDS
+	int "Button authorization window duration (seconds)"
+	range 1 300
+	default 30
+	help
+	  Duration, in seconds, that one DK button press keeps
+	  Aliro::Interface::UserDevice::Authorization::GetState() reporting
+	  AuthorizationState::Authorized (APP_PLAN.md AWP4,
+	  ALIRO-UD-SYRS-P1-011).
+
+module = ALIRO_UD_AUTHORIZATION
+module-str = ALIRO_UD_AUTHORIZATION
+module-dep = LOG
+module-help = Enables Aliro NFC User Device authorization log messages.
+source "$(ZEPHYR_BASE)/subsys/logging/Kconfig.template.log_config"
+
+endmenu # Authorization

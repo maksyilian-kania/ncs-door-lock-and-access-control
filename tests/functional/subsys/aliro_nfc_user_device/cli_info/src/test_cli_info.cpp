@@ -186,3 +186,30 @@ ZTEST(aliro_ud_cli_info, test_credential_staging_transaction_commits)
 	zassert_true(listAfterDelete.find("OK count=0") != std::string::npos, "expected count=0, got: %s",
 		     listAfterDelete.c_str());
 }
+
+/**
+ * @brief "aliro-ud auth" (APP_PLAN.md AWP4): "status" reports the live
+ * button-authorization window state, "press" is the application test
+ * trigger that opens it without physical DK hardware, and "clear" revokes
+ * it again.
+ */
+ZTEST(aliro_ud_cli_info, test_auth_status_press_clear)
+{
+	zassert_true(RunCommand("aliro-ud auth clear").find("OK") != std::string::npos, "clear should succeed");
+
+	const std::string beforePress{ RunCommand("aliro-ud auth status") };
+	zassert_true(beforePress.find("OK state=required") != std::string::npos,
+		     "expected state=required before any press, got: %s", beforePress.c_str());
+
+	zassert_true(RunCommand("aliro-ud auth press").find("OK") != std::string::npos, "press should succeed");
+
+	const std::string afterPress{ RunCommand("aliro-ud auth status") };
+	zassert_true(afterPress.find("OK state=authorized") != std::string::npos,
+		     "expected state=authorized after press, got: %s", afterPress.c_str());
+
+	zassert_true(RunCommand("aliro-ud auth clear").find("OK") != std::string::npos, "clear should succeed");
+
+	const std::string afterClear{ RunCommand("aliro-ud auth status") };
+	zassert_true(afterClear.find("OK state=required") != std::string::npos,
+		     "expected state=required after clear, got: %s", afterClear.c_str());
+}
