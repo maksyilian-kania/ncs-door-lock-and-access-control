@@ -164,6 +164,8 @@ ZTEST(aliro_ud_cli_info, test_credential_staging_transaction_commits)
 					 .c_str())
 			     .find("OK") != std::string::npos,
 		     "set-binding should succeed");
+	zassert_true(RunCommand("aliro-ud credential set-mailbox 8 3").find("OK") != std::string::npos,
+		     "set-mailbox should succeed");
 
 	const std::string commitOutput{ RunCommand("aliro-ud credential commit") };
 	zassert_true(commitOutput.find("OK handle=") != std::string::npos, "expected 'OK handle=', got: %s",
@@ -185,6 +187,65 @@ ZTEST(aliro_ud_cli_info, test_credential_staging_transaction_commits)
 	const std::string listAfterDelete{ RunCommand("aliro-ud credential list") };
 	zassert_true(listAfterDelete.find("OK count=0") != std::string::npos, "expected count=0, got: %s",
 		     listAfterDelete.c_str());
+}
+
+/**
+ * @brief "aliro-ud mailbox" (APP_PLAN.md AWP6): "inspect" reports the
+ * committed configuration staged by "credential set-mailbox", "init"
+ * lazily zero-fills the committed byte storage, "read" returns the
+ * committed bytes, and deleting the owning credential erases the mailbox
+ * (no stale data survives handle reuse).
+ */
+ZTEST(aliro_ud_cli_info, test_mailbox_inspect_init_read_and_erase_on_delete)
+{
+	static const char *const kKeyHex{ "23231022a3662ceb6f2e6a4e998866ae88d6e9da1c72b050ae5c206a1da46712" };
+	static const char *const kReaderGroupIdentifierHex{ "0102030405060708090a0b0c0d0e0f10" };
+	static const char *const kTrustAnchorKeyHex{
+		"04"
+		"1111111111111111111111111111111111111111111111111111111111111111"
+		"2222222222222222222222222222222222222222222222222222222222222222"
+	};
+
+	zassert_true(RunCommand("aliro-ud credential begin-create").find("OK") != std::string::npos,
+		     "begin-create should succeed");
+	RunCommand((std::string("aliro-ud credential set-key ") + kKeyHex).c_str());
+	RunCommand("aliro-ud credential set-policy 1");
+	RunCommand((std::string("aliro-ud credential set-binding 0 ") + kReaderGroupIdentifierHex + " direct " +
+		    kTrustAnchorKeyHex)
+			   .c_str());
+	zassert_true(RunCommand("aliro-ud credential set-mailbox 8 3").find("OK") != std::string::npos,
+		     "set-mailbox should succeed");
+	zassert_true(RunCommand("aliro-ud credential commit").find("OK handle=") != std::string::npos,
+		     "commit should succeed");
+
+	const std::string inspectBeforeInit{ RunCommand("aliro-ud mailbox inspect 1") };
+	zassert_true(inspectBeforeInit.find("OK handle=1 size=8 readable=1 writable=1 settable_in_auth1=0") !=
+			     std::string::npos,
+		     "expected the staged mailbox configuration, got: %s", inspectBeforeInit.c_str());
+	zassert_true(inspectBeforeInit.find("initialized=0") != std::string::npos,
+		     "mailbox should not be initialized before 'mailbox init', got: %s",
+		     inspectBeforeInit.c_str());
+
+	zassert_true(RunCommand("aliro-ud mailbox init 1").find("OK") != std::string::npos,
+		     "mailbox init should succeed");
+
+	const std::string inspectAfterInit{ RunCommand("aliro-ud mailbox inspect 1") };
+	zassert_true(inspectAfterInit.find("initialized=1") != std::string::npos,
+		     "expected initialized=1 after 'mailbox init', got: %s", inspectAfterInit.c_str());
+	zassert_true(inspectAfterInit.find("has_data=0") != std::string::npos,
+		     "a freshly initialized mailbox should be all-zero, got: %s", inspectAfterInit.c_str());
+
+	const std::string readOutput{ RunCommand("aliro-ud mailbox read 1 0 8") };
+	zassert_true(readOutput.find("OK data=0000000000000000") != std::string::npos,
+		     "expected 8 zero bytes, got: %s", readOutput.c_str());
+
+	zassert_true(RunCommand("aliro-ud credential delete 1").find("OK") != std::string::npos,
+		     "delete should succeed");
+
+	const std::string inspectAfterDelete{ RunCommand("aliro-ud mailbox inspect 1") };
+	zassert_true(inspectAfterDelete.find("ERR") != std::string::npos,
+		     "inspecting a deleted credential's mailbox should fail, got: %s",
+		     inspectAfterDelete.c_str());
 }
 
 /**

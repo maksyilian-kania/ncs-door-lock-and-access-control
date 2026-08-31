@@ -39,6 +39,12 @@ target_sources(app PRIVATE
   ${ALIRO_UD_APP_SRC_DIR}/storage/credential/credential_store.cpp
   ${ALIRO_UD_TEST_COMMON_DIR}/fake_credential_persistence.cpp
   ${ALIRO_UD_TEST_COMMON_DIR}/fake_key_backend.cpp
+  # Aliro::Interface::UserDevice::Mailbox implementation (AWP6) and the CLI's
+  # "aliro-ud mailbox" commands over it.
+  ${ALIRO_UD_APP_SRC_DIR}/storage/mailbox/mailbox.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/storage/mailbox/mailbox_sessions.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/storage/mailbox/mailbox_store.cpp
+  ${ALIRO_UD_TEST_COMMON_DIR}/fake_mailbox_persistence.cpp
   # Aliro::Interface::UserDevice::Authorization adapter (AWP4), same
   # real-window/fake-indicator split as worker_lifecycle.
   ${ALIRO_UD_APP_SRC_DIR}/platform/authorization/authorization.cpp

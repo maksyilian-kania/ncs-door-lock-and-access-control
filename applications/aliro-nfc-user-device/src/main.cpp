@@ -12,6 +12,7 @@
 #include "platform/nfc/nfc_transport.h"
 #include "platform/os/app_status.h"
 #include "storage/credential/credential_store.h"
+#include "storage/mailbox/mailbox_store.h"
 
 LOG_MODULE_REGISTER(aliro_nfc_ud, LOG_LEVEL_INF);
 
@@ -31,6 +32,18 @@ int main(void)
 	const AliroError credentialError = AliroUd::Credential::Store::Init();
 	if (credentialError != ALIRO_NO_ERROR) {
 		LOG_ERR("Credential store initialization failed: %d", credentialError.ToInt());
+		AliroUd::AppStatus::SetInitState(AliroUd::AppStatus::InitState::StackInitFailed);
+		return 0;
+	}
+
+	/*
+	 * Mailbox byte storage (AWP6) is keyed by credential handle and reads
+	 * mailbox configuration live from the credential store, so it must
+	 * initialize after the credential store above.
+	 */
+	const AliroError mailboxError = AliroUd::Mailbox::Store::Init();
+	if (mailboxError != ALIRO_NO_ERROR) {
+		LOG_ERR("Mailbox store initialization failed: %d", mailboxError.ToInt());
 		AliroUd::AppStatus::SetInitState(AliroUd::AppStatus::InitState::StackInitFailed);
 		return 0;
 	}

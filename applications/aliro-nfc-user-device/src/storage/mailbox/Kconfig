@@ -1,0 +1,25 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+menu "Mailbox persistence (AWP6)"
+
+config ALIRO_UD_MAILBOX_MAX_SESSIONS
+	int "Maximum number of concurrently open mailbox sessions"
+	default 2
+	range 1 8
+	help
+	  Fixed capacity of the OpenSnapshot()-without-Close() session table
+	  (APP_PLAN.md AWP6). Phase 1 PICS is NFC-only with at most one active
+	  connection, but host tests exercise session isolation with more
+	  than one concurrently open session; a small fixed pool covers both.
+
+module = ALIRO_UD_MAILBOX
+module-str = ALIRO_UD_MAILBOX
+module-dep = LOG
+module-help = Enables Aliro NFC User Device mailbox persistence log messages.
+source "$(ZEPHYR_BASE)/subsys/logging/Kconfig.template.log_config"
+
+endmenu # Mailbox persistence (AWP6)

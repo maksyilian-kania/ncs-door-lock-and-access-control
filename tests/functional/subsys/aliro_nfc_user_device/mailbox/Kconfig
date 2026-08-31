@@ -1,0 +1,16 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+mainmenu "Aliro NFC User Device - Mailbox Test"
+
+# Pulls in CONFIG_ALIRO_UD_MAILBOX_* for mailbox_store.cpp/mailbox_sessions.cpp
+# under test, plus CONFIG_ALIRO_UD_CREDENTIAL_* for the real
+# credential_store.cpp engine this test links against (mailbox configuration
+# lives in the credential record; see CMakeLists.txt).
+rsource "../../../../../applications/aliro-nfc-user-device/src/storage/mailbox/Kconfig"
+rsource "../../../../../applications/aliro-nfc-user-device/src/storage/credential/Kconfig"
+
+source "Kconfig.zephyr"

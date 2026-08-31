@@ -18,6 +18,7 @@
 #include "storage/credential/credential_store.h"
 #include "storage/credential/credential_types.h"
 #include "storage/credential/provisioning.h"
+#include "storage/mailbox/mailbox_store.h"
 
 #include <aliro/user_device/interface.h>
 #include <aliro/user_device/user_device.h>
@@ -538,9 +539,20 @@ int CmdCredentialDelete(const struct shell *sh, size_t argc, char **argv)
 		return 0;
 	}
 
+	const auto credentialHandle = static_cast<::Aliro::UserDevice::CredentialHandle>(handle);
 	const AliroError error = AliroUd::Lifecycle::RunMutation([&]() -> AliroError {
-		return Aliro::UserDeviceStack::Instance().DeleteCredential(
-			static_cast<::Aliro::UserDevice::CredentialHandle>(handle));
+		const auto deleteError = Aliro::UserDeviceStack::Instance().DeleteCredential(credentialHandle);
+		if (deleteError == ALIRO_NO_ERROR) {
+			/*
+			 * Erase this credential's mailbox byte storage too (APP_PLAN.md
+			 * AWP6): credential handles are reused for the next Create() at
+			 * the same slot (storage/credential/Kconfig), so a deleted
+			 * credential's mailbox content must not leak into whichever
+			 * credential is provisioned next at the same handle.
+			 */
+			AliroUd::Mailbox::Store::EraseForCredential(credentialHandle);
+		}
+		return deleteError;
 	});
 
 	if (error != ALIRO_NO_ERROR) {
@@ -557,8 +569,14 @@ int CmdCredentialReset(const struct shell *sh, size_t argc, char **argv)
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
 
-	const AliroError error = AliroUd::Lifecycle::RunMutation(
-		[]() -> AliroError { return Aliro::UserDeviceStack::Instance().ResetProvisionedData(); });
+	const AliroError error = AliroUd::Lifecycle::RunMutation([]() -> AliroError {
+		const auto resetError = Aliro::UserDeviceStack::Instance().ResetProvisionedData();
+		if (resetError == ALIRO_NO_ERROR) {
+			/* Every credential's mailbox byte storage too (see credential delete's comment above). */
+			AliroUd::Mailbox::Store::EraseAll();
+		}
+		return resetError;
+	});
 
 	if (error != ALIRO_NO_ERROR) {
 		PrintError(sh, "credential reset", error);
@@ -652,6 +670,116 @@ int CmdCredentialPreferredGet(const struct shell *sh, size_t argc, char **argv)
 }
 
 /*
+ * "aliro-ud mailbox" (APP_PLAN.md AWP6): Credential-Issuer-level
+ * inspection/read/initialization/reset commands over a credential's
+ * mailbox byte storage. These bypass the Reader-facing
+ * `MailboxPermissions` (readable/writable) bits entirely (Aliro 1.0
+ * Specification section 8.3.1.15, page 60: "The mailbox content SHALL be
+ * readable and writeable by the Credential Issuer"); the Reader-gated
+ * snapshot/stage/commit session contract is exercised only through the
+ * real NFC/stack path, not this CLI.
+ */
+int CmdMailboxInspect(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+
+	unsigned long handle{};
+	if (!ParseUint(argv[1], handle)) {
+		shell_print(sh, "ERR INVALID_ARGUMENT command=mailbox inspect");
+		return 0;
+	}
+
+	const auto credentialHandle = static_cast<::Aliro::UserDevice::CredentialHandle>(handle);
+	AliroUd::Mailbox::Store::Config config{};
+	const auto error = AliroUd::Mailbox::Store::GetConfig(credentialHandle, config);
+	if (error != ALIRO_NO_ERROR) {
+		PrintError(sh, "mailbox inspect", error);
+		return 0;
+	}
+
+	shell_print(sh,
+		    "OK handle=%u size=%u readable=%u writable=%u settable_in_auth1=%u initialized=%u "
+		    "has_data=%u",
+		    static_cast<unsigned>(handle), config.mSizeBytes, config.mPermissions.mReadable ? 1U : 0U,
+		    config.mPermissions.mWritable ? 1U : 0U, config.mPermissions.mSettableInAuth1 ? 1U : 0U,
+		    AliroUd::Mailbox::Store::IsInitialized(credentialHandle) ? 1U : 0U,
+		    AliroUd::Mailbox::Store::HasNonZeroData(credentialHandle) ? 1U : 0U);
+	return 0;
+}
+
+int CmdMailboxRead(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+
+	unsigned long handle{};
+	unsigned long offset{};
+	unsigned long length{};
+	if (!ParseUint(argv[1], handle) || !ParseUint(argv[2], offset) || !ParseUint(argv[3], length) ||
+	    length > AliroUd::Mailbox::kMaxSizeBytes) {
+		shell_print(sh, "ERR INVALID_ARGUMENT command=mailbox read");
+		return 0;
+	}
+
+	std::array<uint8_t, AliroUd::Mailbox::kMaxSizeBytes> data{};
+	const auto error = AliroUd::Mailbox::Store::RawRead(static_cast<::Aliro::UserDevice::CredentialHandle>(handle),
+							    static_cast<size_t>(offset), data.data(),
+							    static_cast<size_t>(length));
+	if (error != ALIRO_NO_ERROR) {
+		PrintError(sh, "mailbox read", error);
+		return 0;
+	}
+
+	shell_fprintf(sh, SHELL_NORMAL, "OK data=");
+	for (size_t i = 0; i < length; ++i) {
+		shell_fprintf(sh, SHELL_NORMAL, "%02x", data[i]);
+	}
+	shell_fprintf(sh, SHELL_NORMAL, "\n");
+	return 0;
+}
+
+int CmdMailboxInit(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+
+	unsigned long handle{};
+	if (!ParseUint(argv[1], handle)) {
+		shell_print(sh, "ERR INVALID_ARGUMENT command=mailbox init");
+		return 0;
+	}
+
+	const auto error =
+		AliroUd::Mailbox::Store::Initialize(static_cast<::Aliro::UserDevice::CredentialHandle>(handle));
+	if (error != ALIRO_NO_ERROR) {
+		PrintError(sh, "mailbox init", error);
+		return 0;
+	}
+
+	shell_print(sh, "OK");
+	return 0;
+}
+
+int CmdMailboxReset(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+
+	unsigned long handle{};
+	if (!ParseUint(argv[1], handle)) {
+		shell_print(sh, "ERR INVALID_ARGUMENT command=mailbox reset");
+		return 0;
+	}
+
+	const auto error =
+		AliroUd::Mailbox::Store::Reset(static_cast<::Aliro::UserDevice::CredentialHandle>(handle));
+	if (error != ALIRO_NO_ERROR) {
+		PrintError(sh, "mailbox reset", error);
+		return 0;
+	}
+
+	shell_print(sh, "OK");
+	return 0;
+}
+
+/*
  * One in-memory staging transaction (APP_PLAN.md AWP3): begin-create/
  * begin-update open it, the field setters below mutate it, and commit/abort
  * close it. None of them take a credential handle argument except
@@ -715,10 +843,24 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 	SHELL_SUBCMD_SET_END);
 
 SHELL_STATIC_SUBCMD_SET_CREATE(
+	sub_mailbox,
+	SHELL_CMD_ARG(inspect, NULL, "<handle> Report non-secret mailbox configuration/state for a credential.",
+		      CmdMailboxInspect, 2, 0),
+	SHELL_CMD_ARG(read, NULL, "<handle> <offset> <length> Read committed mailbox bytes (hex).", CmdMailboxRead,
+		      4, 0),
+	SHELL_CMD_ARG(init, NULL,
+		      "<handle> Ensure committed mailbox byte storage exists (idempotent, zero-fills on first use).",
+		      CmdMailboxInit, 2, 0),
+	SHELL_CMD_ARG(reset, NULL, "<handle> Explicitly re-zero a mailbox's committed byte storage.",
+		      CmdMailboxReset, 2, 0),
+	SHELL_SUBCMD_SET_END);
+
+SHELL_STATIC_SUBCMD_SET_CREATE(
 	sub_aliro_ud,
 	SHELL_CMD_ARG(info, NULL, "Report non-secret build/initialization/session state.", CmdInfo, 1, 0),
 	SHELL_CMD(credential, &sub_credential, "Access Credential provisioning/staging commands (AWP3).", NULL),
 	SHELL_CMD(auth, &sub_auth, "Button authorization window status/test-trigger commands (AWP4).", NULL),
+	SHELL_CMD(mailbox, &sub_mailbox, "Mailbox inspection/read/initialization/reset commands (AWP6).", NULL),
 	SHELL_SUBCMD_SET_END);
 
 /*
