@@ -8,7 +8,7 @@ menu "NFC transport"
 
 config ALIRO_UD_NFC_THREAD_STACK_SIZE
 	int "NFC/stack worker thread stack size"
-	default 20480
+	default 40960
 	help
 	  Stack size for the dedicated high-priority thread that serializes
 	  NFC transport events (field on/off, complete command APDUs) and

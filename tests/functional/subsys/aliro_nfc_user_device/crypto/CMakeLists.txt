@@ -12,8 +12,13 @@ project(aliro_nfc_user_device_crypto)
 
 set(ALIRO_UD_APP_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../applications/aliro-nfc-user-device/src)
 set(ALIRO_UD_TEST_COMMON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../common)
+set(ALIRO_UD_STACK_SRC_DIR ${ZEPHYR_NCS_ALIRO_MODULE_DIR}/stack/src)
 
-target_include_directories(app PRIVATE ${ALIRO_UD_APP_SRC_DIR} ${ALIRO_UD_TEST_COMMON_DIR})
+target_include_directories(app PRIVATE
+  ${ALIRO_UD_APP_SRC_DIR}
+  ${ALIRO_UD_TEST_COMMON_DIR}
+  ${ALIRO_UD_STACK_SRC_DIR}
+)
 
 # Aliro::Interface::UserDevice::Crypto/CredentialSigning implementation under
 # test (APP_PLAN.md AWP5), plus the real AWP3 credential store/key backend

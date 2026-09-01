@@ -42,6 +42,16 @@ using namespace Aliro::CryptoTypes;
 
 namespace {
 
+constexpr KeyId kImportedKeyMarker{ 0x80000000u };
+constexpr size_t kMaxImportedKeys{ 4 };
+
+struct ImportedKeySlot {
+	psa_key_id_t deriveKeyId{};
+	psa_key_id_t aeadKeyId{};
+};
+
+std::array<ImportedKeySlot, kMaxImportedKeys> gImportedKeySlots{};
+
 int InitPsaCrypto(void)
 {
 	const psa_status_t status = psa_crypto_init();
@@ -54,6 +64,96 @@ int InitPsaCrypto(void)
 }
 
 SYS_INIT(InitPsaCrypto, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+
+bool IsImportedKey(KeyId keyId)
+{
+	return (keyId & kImportedKeyMarker) != 0;
+}
+
+size_t ImportedKeySlotIndex(KeyId keyId)
+{
+	return static_cast<size_t>(keyId & ~kImportedKeyMarker);
+}
+
+psa_key_id_t ResolveDeriveKeyId(KeyId keyId)
+{
+	if (!IsImportedKey(keyId)) {
+		return static_cast<psa_key_id_t>(keyId);
+	}
+
+	const size_t index = ImportedKeySlotIndex(keyId);
+	if (index >= kMaxImportedKeys) {
+		return 0;
+	}
+
+	return gImportedKeySlots[index].deriveKeyId;
+}
+
+psa_key_id_t ResolveAeadKeyId(KeyId keyId)
+{
+	if (!IsImportedKey(keyId)) {
+		return static_cast<psa_key_id_t>(keyId);
+	}
+
+	const size_t index = ImportedKeySlotIndex(keyId);
+	if (index >= kMaxImportedKeys) {
+		return 0;
+	}
+
+	return gImportedKeySlots[index].aeadKeyId;
+}
+
+psa_key_attributes_t GetImportedDeriveKeyAttributes(size_t keyMaterialLength)
+{
+	psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+
+	psa_set_key_type(&attributes, PSA_KEY_TYPE_DERIVE);
+	psa_set_key_algorithm(&attributes, PSA_ALG_HKDF(PSA_ALG_SHA_256));
+	psa_set_key_bits(&attributes, PSA_BYTES_TO_BITS(keyMaterialLength));
+	psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_DERIVE);
+
+	return attributes;
+}
+
+psa_key_attributes_t GetImportedAeadKeyAttributes(size_t keyMaterialLength)
+{
+	psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+
+	psa_set_key_type(&attributes, PSA_KEY_TYPE_AES);
+	psa_set_key_algorithm(&attributes, PSA_ALG_GCM);
+	psa_set_key_bits(&attributes, PSA_BYTES_TO_BITS(keyMaterialLength));
+	psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+
+	return attributes;
+}
+
+AliroError DestroyImportedKeySlot(size_t index)
+{
+	if (index >= kMaxImportedKeys) {
+		return ALIRO_ERROR_INTERNAL;
+	}
+
+	ImportedKeySlot &slot = gImportedKeySlots[index];
+
+	if (slot.deriveKeyId != 0) {
+		const psa_status_t status = psa_destroy_key(slot.deriveKeyId);
+		if (status != PSA_SUCCESS && status != PSA_ERROR_INVALID_HANDLE) {
+			LOG_ERR("psa_destroy_key(derive 0x%08x) failed: %d", slot.deriveKeyId, status);
+			return ALIRO_ERROR_INTERNAL;
+		}
+	}
+
+	if (slot.aeadKeyId != 0) {
+		const psa_status_t status = psa_destroy_key(slot.aeadKeyId);
+		if (status != PSA_SUCCESS && status != PSA_ERROR_INVALID_HANDLE) {
+			LOG_ERR("psa_destroy_key(aead 0x%08x) failed: %d", slot.aeadKeyId, status);
+			return ALIRO_ERROR_INTERNAL;
+		}
+	}
+
+	slot = {};
+	return ALIRO_NO_ERROR;
+}
 
 } // namespace
 
@@ -142,7 +242,8 @@ AliroError RunHkdfDerivation(KeyId keyId, const uint8_t *info, size_t infoLength
 		return ALIRO_ERROR_INTERNAL;
 	}
 
-	status = psa_key_derivation_input_key(&operation, PSA_KEY_DERIVATION_INPUT_SECRET, keyId);
+	status = psa_key_derivation_input_key(&operation, PSA_KEY_DERIVATION_INPUT_SECRET,
+					      ResolveDeriveKeyId(keyId));
 	if (status != PSA_SUCCESS) {
 		LOG_ERR("psa_key_derivation_input_key(SECRET) failed: %d", status);
 		psa_key_derivation_abort(&operation);
@@ -230,8 +331,9 @@ AliroError AeadEncrypt(KeyId keyId, const uint8_t *plainText, size_t plainTextLe
 	}
 
 	size_t outLen{};
+	const psa_key_id_t psaKeyId = ResolveAeadKeyId(keyId);
 	const psa_status_t status =
-		psa_aead_encrypt(keyId, PSA_ALG_GCM, nonce.data(), nonce.size(), additionalData, additionalDataLength,
+		psa_aead_encrypt(psaKeyId, PSA_ALG_GCM, nonce.data(), nonce.size(), additionalData, additionalDataLength,
 				 plainText, plainTextLength, scratch.data(), scratch.size(), &outLen);
 	if (status != PSA_SUCCESS || outLen != plainTextLength + outAuthTag.size()) {
 		LOG_WRN("psa_aead_encrypt() failed: %d", status);
@@ -248,8 +350,9 @@ AliroError AeadDecrypt(KeyId keyId, const uint8_t *cipherTextWithTag, size_t cip
 		       uint8_t *outPlainText, size_t &plainTextLength)
 {
 	size_t outLen{};
+	const psa_key_id_t psaKeyId = ResolveAeadKeyId(keyId);
 	const psa_status_t status =
-		psa_aead_decrypt(keyId, PSA_ALG_GCM, nonce.data(), nonce.size(), additionalData, additionalDataLength,
+		psa_aead_decrypt(psaKeyId, PSA_ALG_GCM, nonce.data(), nonce.size(), additionalData, additionalDataLength,
 				 cipherTextWithTag, cipherTextWithTagLength, outPlainText, plainTextLength, &outLen);
 	if (status != PSA_SUCCESS) {
 		return status == PSA_ERROR_INVALID_SIGNATURE ? ALIRO_INVALID_AUTHENTICATION_TAG
@@ -296,6 +399,19 @@ AliroError Sha256(const uint8_t *data, size_t dataLength, Sha256Hash &outHash)
 	return ALIRO_NO_ERROR;
 }
 
+AliroError Sha1(const uint8_t *data, size_t dataLength, Sha1Hash &outHash)
+{
+	size_t outLen{};
+	const psa_status_t status =
+		psa_hash_compute(PSA_ALG_SHA_1, data, dataLength, outHash.data(), outHash.size(), &outLen);
+	if (status != PSA_SUCCESS || outLen != outHash.size()) {
+		LOG_ERR("psa_hash_compute(SHA-1) failed: %d", status);
+		return ALIRO_ERROR_INTERNAL;
+	}
+
+	return ALIRO_NO_ERROR;
+}
+
 AliroError ValidateCertificate(ConstData certificate, const PublicKey &issuerPublicKey, PublicKey &outSubjectPublicKey)
 {
 	return AliroUd::Crypto::Certificate::Validate(certificate, issuerPublicKey, outSubjectPublicKey);
@@ -307,6 +423,12 @@ AliroError DestroyKey(KeyId &keyId)
 		return ALIRO_NO_ERROR;
 	}
 
+	if (IsImportedKey(keyId)) {
+		const AliroError error = DestroyImportedKeySlot(ImportedKeySlotIndex(keyId));
+		keyId = 0;
+		return error;
+	}
+
 	const psa_status_t status = psa_destroy_key(keyId);
 	if (status != PSA_SUCCESS && status != PSA_ERROR_INVALID_HANDLE) {
 		LOG_ERR("psa_destroy_key(0x%08x) failed: %d", keyId, status);
@@ -314,6 +436,50 @@ AliroError DestroyKey(KeyId &keyId)
 	}
 
 	keyId = 0;
+	return ALIRO_NO_ERROR;
+}
+
+AliroError ImportKey(const uint8_t *keyMaterial, size_t keyMaterialLength, KeyId &outKeyId)
+{
+	outKeyId = 0;
+
+	if (keyMaterial == nullptr || keyMaterialLength == 0) {
+		return ALIRO_INVALID_ARGUMENT;
+	}
+
+	size_t slotIndex{ kMaxImportedKeys };
+	for (size_t i = 0; i < kMaxImportedKeys; ++i) {
+		if (gImportedKeySlots[i].deriveKeyId == 0 && gImportedKeySlots[i].aeadKeyId == 0) {
+			slotIndex = i;
+			break;
+		}
+	}
+	if (slotIndex >= kMaxImportedKeys) {
+		LOG_ERR("No free ImportKey slot");
+		return ALIRO_ERROR_INTERNAL;
+	}
+
+	psa_key_attributes_t deriveAttributes = GetImportedDeriveKeyAttributes(keyMaterialLength);
+	psa_key_id_t deriveKeyId{};
+	const psa_status_t deriveStatus =
+		psa_import_key(&deriveAttributes, keyMaterial, keyMaterialLength, &deriveKeyId);
+	if (deriveStatus != PSA_SUCCESS) {
+		LOG_ERR("psa_import_key(derive) failed: %d", deriveStatus);
+		return ALIRO_ERROR_INTERNAL;
+	}
+
+	psa_key_attributes_t aeadAttributes = GetImportedAeadKeyAttributes(keyMaterialLength);
+	psa_key_id_t aeadKeyId{};
+	const psa_status_t aeadStatus = psa_import_key(&aeadAttributes, keyMaterial, keyMaterialLength, &aeadKeyId);
+	if (aeadStatus != PSA_SUCCESS) {
+		LOG_ERR("psa_import_key(aead) failed: %d", aeadStatus);
+		psa_destroy_key(deriveKeyId);
+		return ALIRO_ERROR_INTERNAL;
+	}
+
+	gImportedKeySlots[slotIndex].deriveKeyId = deriveKeyId;
+	gImportedKeySlots[slotIndex].aeadKeyId = aeadKeyId;
+	outKeyId = kImportedKeyMarker | static_cast<KeyId>(slotIndex);
 	return ALIRO_NO_ERROR;
 }
 

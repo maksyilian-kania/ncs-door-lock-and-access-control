@@ -17,6 +17,8 @@
  * module that knows how an application-facing key ID maps to a usable PSA
  * key handle on the active backend, real or host-test fake) — the private
  * key scalar is never copied back into this module or any other.
+ * GetPublicKey() follows the same handle resolution path and exports only
+ * the credential's public key via KeyBackend::GetPublicKey().
  */
 namespace Aliro::Interface::UserDevice::CredentialSigning {
 
@@ -36,6 +38,19 @@ AliroError Sign(::Aliro::UserDevice::CredentialHandle handle, const uint8_t *dat
 	}
 
 	return AliroUd::Credential::KeyBackend::Sign(record.mKeyId, data, dataLength, outSignature);
+}
+
+AliroError GetPublicKey(::Aliro::UserDevice::CredentialHandle handle, CryptoTypes::PublicKey &outPublicKey)
+{
+	outPublicKey.fill(0);
+
+	AliroUd::Credential::PersistedCredential record{};
+	const AliroError lookupError = AliroUd::Credential::Store::GetFullRecord(handle, record);
+	if (lookupError != ALIRO_NO_ERROR) {
+		return lookupError;
+	}
+
+	return AliroUd::Credential::KeyBackend::GetPublicKey(record.mKeyId, outPublicKey);
 }
 
 } // namespace Aliro::Interface::UserDevice::CredentialSigning

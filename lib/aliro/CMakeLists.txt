@@ -8,6 +8,12 @@ if(CONFIG_ZEPHYR_NCS_ALIRO_MODULE AND CONFIG_NCS_ALIRO_SRC)
   return()
 endif()
 
+# native_sim unit tests in ncs-aliro compile selected stack sources directly in
+# their CMakeLists.txt; no compatible prebuilt archive exists for the host target.
+if(CONFIG_SOC_POSIX)
+  return()
+endif()
+
 if(CONFIG_NCS_ALIRO_BLE_UWB)
   set(ALIRO_LIB_NAME libaliro_ble.a)
 else(CONFIG_NCS_ALIRO_BLE_UWB)
