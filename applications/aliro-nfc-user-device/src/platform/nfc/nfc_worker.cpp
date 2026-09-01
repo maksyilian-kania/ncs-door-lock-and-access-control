@@ -6,6 +6,8 @@
 
 #include "platform/nfc/nfc_worker.h"
 
+#include "platform/nfc/command_timing.h"
+
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
@@ -229,7 +231,17 @@ void HandleEvent(const WorkerEvent &event)
 		}
 
 		Aliro::Data apdu{ const_cast<uint8_t *>(event.mApdu.data()), event.mApduLength };
+		/*
+		 * HandleCommandApdu() only returns after the stack has
+		 * already called
+		 * Aliro::Interface::UserDevice::Nfc::SendResponseApdu()
+		 * synchronously (nfc_transport.cpp), so this pair measures
+		 * exactly the command-delivery-to-response-sent boundary
+		 * (APP_PLAN.md AWP7; see command_timing.h).
+		 */
+		BeginCommandTiming();
 		Aliro::UserDeviceStack::Instance().HandleCommandApdu(handle, apdu);
+		EndCommandTiming();
 		break;
 	}
 	case EventKind::StackEvent:

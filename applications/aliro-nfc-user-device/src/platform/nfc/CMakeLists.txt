@@ -12,3 +12,8 @@ target_sources(app PRIVATE
   nfc_worker.cpp
   nfc_transport.cpp
 )
+
+# Command-to-response timing instrumentation (APP_PLAN.md AWP7): entirely
+# removable from production builds, so its one source file is only added to
+# the build at all when CONFIG_ALIRO_UD_TIMING_INSTRUMENTATION is enabled.
+target_sources_ifdef(CONFIG_ALIRO_UD_TIMING_INSTRUMENTATION app PRIVATE command_timing.cpp)

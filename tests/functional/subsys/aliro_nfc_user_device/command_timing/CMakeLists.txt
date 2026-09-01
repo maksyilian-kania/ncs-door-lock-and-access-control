@@ -8,7 +8,7 @@ cmake_minimum_required(VERSION 3.20.0)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
-project(aliro_nfc_user_device_worker_lifecycle)
+project(aliro_nfc_user_device_command_timing)
 
 set(ALIRO_UD_APP_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../applications/aliro-nfc-user-device/src)
 set(ALIRO_UD_TEST_COMMON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../common)
@@ -16,12 +16,11 @@ set(ALIRO_UD_TEST_COMMON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../common)
 target_include_directories(app PRIVATE ${ALIRO_UD_APP_SRC_DIR} ${ALIRO_UD_TEST_COMMON_DIR})
 
 # Real platform/nfc worker (bounded queue + dedicated thread) and platform/os
-# (mutex, timer, deferred-event queue, logging) code under test, built
-# exactly as shipped. nfc_transport.cpp (the nfc_t4t_lib hardware glue) is
-# intentionally excluded: this test substitutes fake_nfc_interface.cpp for
-# Aliro::Interface::UserDevice::Nfc so it can run on native_sim/native/64
-# without real NFC hardware, while still exercising the real worker
-# thread/queue and the real Aliro::UserDeviceStack (AWP1).
+# code under test, built exactly as shipped (see worker_lifecycle's
+# CMakeLists.txt for the full rationale). nfc_transport.cpp is intentionally
+# excluded in favor of the shared fake_nfc_interface.cpp so this test can run
+# on native_sim/native/64 (APP_PLAN.md AWP7: command-to-response timing
+# instrumentation).
 target_sources(app PRIVATE
   ${ALIRO_UD_APP_SRC_DIR}/platform/nfc/nfc_worker.cpp
   ${ALIRO_UD_APP_SRC_DIR}/platform/os/os_mutex.cpp
@@ -30,33 +29,25 @@ target_sources(app PRIVATE
   ${ALIRO_UD_APP_SRC_DIR}/platform/os/os_trusted_time.cpp
   ${ALIRO_UD_APP_SRC_DIR}/platform/os/os_logging.cpp
   ${ALIRO_UD_APP_SRC_DIR}/platform/os/transaction.cpp
-  # Aliro::Interface::UserDevice::Credential/Trust adapter (AWP3) and its
-  # real credential_store.cpp engine; the real Aliro::UserDeviceStack pulled
-  # in below calls into these unconditionally (ncs-aliro WP5's
-  # CredentialManager::EvaluateAuth0()). credential_persistence_settings.cpp
-  # and key_backend_psa.cpp are swapped for in-memory fakes (native_sim has
-  # no hardware-backed flash/trusted storage); see
-  # tests/functional/subsys/aliro_nfc_user_device/common/.
+  ${ALIRO_UD_APP_SRC_DIR}/platform/crypto/crypto.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/platform/crypto/certificate.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/platform/crypto/credential_signing.cpp
   ${ALIRO_UD_APP_SRC_DIR}/storage/credential/credential.cpp
   ${ALIRO_UD_APP_SRC_DIR}/storage/credential/credential_store.cpp
   ${ALIRO_UD_TEST_COMMON_DIR}/fake_credential_persistence.cpp
   ${ALIRO_UD_TEST_COMMON_DIR}/fake_key_backend.cpp
-  # Aliro::Interface::UserDevice::Authorization adapter (AWP4) and its real
-  # authorization_window.cpp state machine; authorization_button.cpp/
-  # authorization_led.cpp (DK-hardware-only GPIO) are excluded, substituted
-  # by fake_authorization_indicator.cpp.
   ${ALIRO_UD_APP_SRC_DIR}/platform/authorization/authorization.cpp
   ${ALIRO_UD_APP_SRC_DIR}/platform/authorization/authorization_window.cpp
   ${ALIRO_UD_TEST_COMMON_DIR}/fake_authorization_indicator.cpp
   src/fake_nfc_interface.cpp
-  src/test_worker_lifecycle.cpp
+  src/test_command_timing.cpp
 )
 
-# nfc_worker.cpp calls into BeginCommandTiming()/EndCommandTiming()
-# (APP_PLAN.md AWP7); mirrors the application's own CMakeLists.txt so this
-# test links exactly like the real application when
-# CONFIG_ALIRO_UD_TIMING_INSTRUMENTATION (rsourced via platform/nfc/Kconfig,
-# default y) is enabled.
+# Mirrors the application's own CMakeLists.txt: the CommandTiming module is
+# only compiled in when the Kconfig option is enabled, so the "disabled"
+# testcase.yaml scenario (extra_configs:
+# CONFIG_ALIRO_UD_TIMING_INSTRUMENTATION=n) exercises the exact same
+# no-op/removed-from-the-build behavior a production build would have.
 target_sources_ifdef(CONFIG_ALIRO_UD_TIMING_INSTRUMENTATION app PRIVATE
   ${ALIRO_UD_APP_SRC_DIR}/platform/nfc/command_timing.cpp
 )

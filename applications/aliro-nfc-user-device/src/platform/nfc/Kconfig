@@ -31,6 +31,20 @@ config ALIRO_UD_NFC_EVENT_QUEUE_DEPTH
 	  Events posted while the queue is full are dropped deterministically
 	  (logged, never blocking the producer); see docs/evidence.md.
 
+config ALIRO_UD_TIMING_INSTRUMENTATION
+	bool "Command-to-response timing instrumentation"
+	default y
+	help
+	  Records the duration from delivering a command APDU to the
+	  Aliro User Device stack to the stack returning from that call (by
+	  which point it has already synchronously sent the response APDU),
+	  as informational/regression evidence (APP_PLAN.md AWP7: no
+	  normative NFC processing-time bound applies to this application's
+	  PICS; see docs/evidence.md). Lightweight (one k_uptime_get_32()
+	  call and a handful of integer updates per command) and safe to
+	  disable entirely for production builds that do not need it: its
+	  one source file is not even compiled in when this is disabled.
+
 module = ALIRO_UD_NFC
 module-str = ALIRO_UD_NFC
 module-dep = LOG

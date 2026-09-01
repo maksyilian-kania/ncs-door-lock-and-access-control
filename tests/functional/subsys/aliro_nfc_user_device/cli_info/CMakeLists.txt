@@ -53,3 +53,12 @@ target_sources(app PRIVATE
   ${ALIRO_UD_WORKER_LIFECYCLE_TEST_SRC_DIR}/fake_nfc_interface.cpp
   src/test_cli_info.cpp
 )
+
+# cli.cpp's "aliro-ud timing" commands and nfc_worker.cpp both call into
+# BeginCommandTiming()/EndCommandTiming()/GetCommandTimingSnapshot()/
+# ResetCommandTimingStats() (APP_PLAN.md AWP7); mirrors the application's
+# own CMakeLists.txt (see worker_lifecycle's copy of this comment for the
+# full rationale).
+target_sources_ifdef(CONFIG_ALIRO_UD_TIMING_INSTRUMENTATION app PRIVATE
+  ${ALIRO_UD_APP_SRC_DIR}/platform/nfc/command_timing.cpp
+)

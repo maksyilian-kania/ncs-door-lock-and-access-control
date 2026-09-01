@@ -1,0 +1,23 @@
+tests:
+  aliro_nfc_user_device.functional.command_timing:
+    build_only: false
+    # native_sim/native (32-bit) requires host gcc multilib headers that are
+    # not guaranteed to be present; native_sim/native/64 is the Zephyr-
+    # supported variant for 64-bit-only host toolchains (see docs/evidence.md).
+    platform_allow: native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags: aliro_nfc_user_device
+  aliro_nfc_user_device.functional.command_timing_disabled:
+    build_only: false
+    platform_allow: native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags: aliro_nfc_user_device
+    # APP_PLAN.md AWP7: "removable from production builds" - confirms that
+    # with the Kconfig option off, command_timing.cpp is not even compiled
+    # in (CMakeLists.txt's target_sources_ifdef) and every timing statistic
+    # stays at its all-zero/disabled default no matter how much NFC traffic
+    # is exercised.
+    extra_configs:
+      - CONFIG_ALIRO_UD_TIMING_INSTRUMENTATION=n

@@ -1,0 +1,21 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+mainmenu "Aliro NFC User Device - Command Timing Test"
+
+# Pulls in CONFIG_ALIRO_UD_NFC_* (including
+# CONFIG_ALIRO_UD_TIMING_INSTRUMENTATION), CONFIG_ALIRO_UD_OS_*, and friends:
+# this test builds the real platform/nfc/nfc_worker.cpp,
+# platform/nfc/command_timing.cpp, and platform/os/*.cpp sources directly
+# (see CMakeLists.txt), so it needs the same Kconfig options they reference,
+# normally sourced via the application's own Kconfig.
+rsource "../../../../../applications/aliro-nfc-user-device/src/platform/nfc/Kconfig"
+rsource "../../../../../applications/aliro-nfc-user-device/src/platform/os/Kconfig"
+rsource "../../../../../applications/aliro-nfc-user-device/src/platform/authorization/Kconfig"
+rsource "../../../../../applications/aliro-nfc-user-device/src/platform/crypto/Kconfig"
+rsource "../../../../../applications/aliro-nfc-user-device/src/storage/credential/Kconfig"
+
+source "Kconfig.zephyr"

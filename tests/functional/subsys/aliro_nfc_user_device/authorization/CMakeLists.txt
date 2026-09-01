@@ -44,3 +44,10 @@ target_sources(app PRIVATE
   src/test_authorization_contract.cpp
   src/test_authorization_e2e.cpp
 )
+
+# nfc_worker.cpp calls into BeginCommandTiming()/EndCommandTiming()
+# (APP_PLAN.md AWP7); mirrors the application's own CMakeLists.txt (see
+# worker_lifecycle's copy of this comment for the full rationale).
+target_sources_ifdef(CONFIG_ALIRO_UD_TIMING_INSTRUMENTATION app PRIVATE
+  ${ALIRO_UD_APP_SRC_DIR}/platform/nfc/command_timing.cpp
+)

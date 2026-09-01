@@ -13,6 +13,7 @@
 #include "lifecycle/lifecycle.h"
 #include "platform/authorization/authorization_indicator.h"
 #include "platform/authorization/authorization_window.h"
+#include "platform/nfc/command_timing.h"
 #include "platform/nfc/nfc_worker.h"
 #include "platform/os/app_status.h"
 #include "storage/credential/credential_store.h"
@@ -758,6 +759,33 @@ int CmdMailboxInit(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/*
+ * "aliro-ud timing" (APP_PLAN.md AWP7): command-to-response duration
+ * evidence. `mEnabled=0` in `stats`' output means
+ * CONFIG_ALIRO_UD_TIMING_INSTRUMENTATION is disabled for this build (see
+ * command_timing.h); every other field is then always zero.
+ */
+int CmdTimingStats(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	const auto snapshot = AliroUd::Nfc::GetCommandTimingSnapshot();
+	shell_print(sh, "OK enabled=%u samples=%zu last_ms=%u max_ms=%u", snapshot.mEnabled ? 1U : 0U,
+		    snapshot.mSampleCount, snapshot.mLastDurationMs, snapshot.mMaxDurationMs);
+	return 0;
+}
+
+int CmdTimingReset(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	AliroUd::Nfc::ResetCommandTimingStats();
+	shell_print(sh, "OK");
+	return 0;
+}
+
 int CmdMailboxReset(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
@@ -856,11 +884,20 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 	SHELL_SUBCMD_SET_END);
 
 SHELL_STATIC_SUBCMD_SET_CREATE(
+	sub_timing,
+	SHELL_CMD_ARG(stats, NULL,
+		      "Report command-to-response timing evidence (sample count, last/max duration).",
+		      CmdTimingStats, 1, 0),
+	SHELL_CMD_ARG(reset, NULL, "Reset command-to-response timing statistics.", CmdTimingReset, 1, 0),
+	SHELL_SUBCMD_SET_END);
+
+SHELL_STATIC_SUBCMD_SET_CREATE(
 	sub_aliro_ud,
 	SHELL_CMD_ARG(info, NULL, "Report non-secret build/initialization/session state.", CmdInfo, 1, 0),
 	SHELL_CMD(credential, &sub_credential, "Access Credential provisioning/staging commands (AWP3).", NULL),
 	SHELL_CMD(auth, &sub_auth, "Button authorization window status/test-trigger commands (AWP4).", NULL),
 	SHELL_CMD(mailbox, &sub_mailbox, "Mailbox inspection/read/initialization/reset commands (AWP6).", NULL),
+	SHELL_CMD(timing, &sub_timing, "Command-to-response timing evidence commands (AWP7).", NULL),
 	SHELL_SUBCMD_SET_END);
 
 /*

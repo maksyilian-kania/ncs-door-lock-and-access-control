@@ -195,8 +195,19 @@ TimingConstraints GetTimingConstraints(ConnectionHandle handle)
 	ARG_UNUSED(handle);
 
 	/*
-	 * No timing bound enforced yet: the exact ALIRO-TP response-time
-	 * bounds and their measurement are added in AWP7 (APP_PLAN.md).
+	 * AWP7 (APP_PLAN.md) searched the Aliro 1.0 Specification and Test
+	 * Plan corpus for a normative, numeric NFC command-processing-time
+	 * bound applicable to this application's PICS and found none: the
+	 * only explicit application-layer timeout in that corpus (1500 ms)
+	 * applies to the BLE interface, which this NFC-only User Device does
+	 * not implement. The transport-level ISO-DEP Frame Waiting Time is
+	 * negotiated by `nfc_t4t_lib`/`isodep.c` itself, is not exposed to
+	 * this application, and this application has no API to request a
+	 * Waiting Time Extension when it needs more of that budget; there is
+	 * therefore no value this function could report that the caller
+	 * could act on. `command_timing.h`'s command-to-response duration
+	 * measurements are AWP7's informational/regression evidence for
+	 * ALIRO-UD-SYRS-P1-040 instead (see docs/evidence.md).
 	 */
 	return TimingConstraints{};
 }
