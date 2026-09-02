@@ -74,7 +74,11 @@ AliroError GetConfigLocked(CredentialHandle handle, Config &outConfig)
 	outConfig.mSizeBytes = record.mMailbox.mSizeBytes;
 	outConfig.mPermissions.mReadable = record.mMailbox.mReadable;
 	outConfig.mPermissions.mWritable = record.mMailbox.mWritable;
-	outConfig.mPermissions.mSettableInAuth1 = record.mMailbox.mSettableInAuth1;
+	/* WP7 stack impact (see docs/wp7_stack_impact.md): mSettableInAuth1 no longer exists; the
+	 * AUTH1 mailbox_data_subset descriptor is copied separately below instead. */
+	outConfig.mDataSubsetConfigured = record.mMailbox.mDataSubsetConfigured;
+	outConfig.mDataSubsetPairCount = record.mMailbox.mDataSubsetPairCount;
+	outConfig.mDataSubsetPairs = record.mMailbox.mDataSubsetPairs;
 	return ALIRO_NO_ERROR;
 }
 

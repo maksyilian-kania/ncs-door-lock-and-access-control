@@ -333,7 +333,16 @@ int CmdCredentialSetMailbox(const struct shell *sh, size_t argc, char **argv)
 
 	unsigned long size{};
 	unsigned long rights{};
-	if (!ParseUint(argv[1], size) || size > kMailboxMaxSizeBytes || !ParseUint(argv[2], rights) || rights > 7) {
+	/*
+	 * WP7 stack impact (see docs/wp7_stack_impact.md): `rights` is now a
+	 * 2-bit mask (readable=0x1, writable=0x2). Bit 2 ("settable in
+	 * AUTH1") was removed upstream - the AUTH1 mailbox_data_subset is
+	 * read-only from the Reader's perspective - so `rights` > 3 is now
+	 * rejected instead of silently accepted. Use
+	 * "credential set-mailbox-data-subset" to provision the subset
+	 * descriptor itself.
+	 */
+	if (!ParseUint(argv[1], size) || size > kMailboxMaxSizeBytes || !ParseUint(argv[2], rights) || rights > 3) {
 		shell_print(sh, "ERR INVALID_ARGUMENT command=credential set-mailbox");
 		return 0;
 	}
@@ -342,7 +351,41 @@ int CmdCredentialSetMailbox(const struct shell *sh, size_t argc, char **argv)
 	sCandidate.mMailbox.mSizeBytes = static_cast<uint32_t>(size);
 	sCandidate.mMailbox.mReadable = (rights & 0x1) != 0;
 	sCandidate.mMailbox.mWritable = (rights & 0x2) != 0;
-	sCandidate.mMailbox.mSettableInAuth1 = (rights & 0x4) != 0;
+	shell_print(sh, "OK");
+	return 0;
+}
+
+/*
+ * WP7 stack impact (see docs/wp7_stack_impact.md): stages one AUTH1
+ * mailbox_data_subset (offset, length) pair. Mirrors
+ * CmdCredentialSetBinding()'s indexed-slot pattern. `index` must be less
+ * than CONFIG_ALIRO_UD_MAILBOX_MAX_DATA_SUBSET_PAIRS; bounds against the
+ * mailbox's own provisioned size are re-checked at `commit` (validated
+ * once the full candidate, including mSizeBytes, is known).
+ */
+int CmdCredentialSetMailboxDataSubset(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+
+	if (!sCandidate.mActive) {
+		shell_print(sh, "ERR NO_TRANSACTION command=credential set-mailbox-data-subset");
+		return 0;
+	}
+
+	unsigned long index{};
+	unsigned long offset{};
+	unsigned long length{};
+	if (!ParseUint(argv[1], index) || index >= AliroUd::Credential::kMaxMailboxDataSubsetPairs ||
+	    !ParseUint(argv[2], offset) || offset > UINT16_MAX || !ParseUint(argv[3], length) || length > UINT16_MAX) {
+		shell_print(sh, "ERR INVALID_ARGUMENT command=credential set-mailbox-data-subset");
+		return 0;
+	}
+
+	sCandidate.mMailbox.mDataSubsetConfigured = true;
+	sCandidate.mMailbox.mDataSubsetPairs[index].mOffset = static_cast<uint16_t>(offset);
+	sCandidate.mMailbox.mDataSubsetPairs[index].mLength = static_cast<uint16_t>(length);
+	sCandidate.mMailbox.mDataSubsetPairCount =
+		MAX(sCandidate.mMailbox.mDataSubsetPairCount, static_cast<uint32_t>(index) + 1);
 	shell_print(sh, "OK");
 	return 0;
 }
@@ -698,11 +741,18 @@ int CmdMailboxInspect(const struct shell *sh, size_t argc, char **argv)
 		return 0;
 	}
 
+	/*
+	 * WP7 stack impact (see docs/wp7_stack_impact.md): "settable_in_auth1" is
+	 * gone (removed upstream); "data_subset_configured"/"data_subset_pairs"
+	 * report the AUTH1 mailbox_data_subset descriptor staged by
+	 * "credential set-mailbox-data-subset" instead.
+	 */
 	shell_print(sh,
-		    "OK handle=%u size=%u readable=%u writable=%u settable_in_auth1=%u initialized=%u "
-		    "has_data=%u",
+		    "OK handle=%u size=%u readable=%u writable=%u data_subset_configured=%u data_subset_pairs=%u "
+		    "initialized=%u has_data=%u",
 		    static_cast<unsigned>(handle), config.mSizeBytes, config.mPermissions.mReadable ? 1U : 0U,
-		    config.mPermissions.mWritable ? 1U : 0U, config.mPermissions.mSettableInAuth1 ? 1U : 0U,
+		    config.mPermissions.mWritable ? 1U : 0U, config.mDataSubsetConfigured ? 1U : 0U,
+		    static_cast<unsigned>(config.mDataSubsetPairCount),
 		    AliroUd::Mailbox::Store::IsInitialized(credentialHandle) ? 1U : 0U,
 		    AliroUd::Mailbox::Store::HasNonZeroData(credentialHandle) ? 1U : 0U);
 	return 0;
@@ -828,8 +878,11 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		      "reader_group_identifier binding.",
 		      CmdCredentialSetBinding, 5, 0),
 	SHELL_CMD_ARG(set-policy, NULL, "<1|2|3> Stage the authentication_policy.", CmdCredentialSetPolicy, 2, 0),
-	SHELL_CMD_ARG(set-mailbox, NULL, "<size> <rights> Stage the mailbox configuration.",
+	SHELL_CMD_ARG(set-mailbox, NULL, "<size> <rights (0-3: bit0=readable, bit1=writable)> Stage the mailbox configuration.",
 		      CmdCredentialSetMailbox, 3, 0),
+	SHELL_CMD_ARG(set-mailbox-data-subset, NULL,
+		      "<index> <offset> <length> Stage one AUTH1 mailbox_data_subset pair.",
+		      CmdCredentialSetMailboxDataSubset, 4, 0),
 	SHELL_CMD_ARG(set-credential-timestamp, NULL, "<hex> Stage credential_signed_timestamp.",
 		      CmdCredentialSetCredentialTimestamp, 2, 0),
 	SHELL_CMD_ARG(set-revocation-timestamp, NULL, "<hex> Stage revocation_signed_timestamp.",

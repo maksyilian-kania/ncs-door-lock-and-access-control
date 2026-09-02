@@ -2,6 +2,22 @@
 
 Created in AWP0 per `APP_PLAN.md` §1; updated in every subsequent AWP.
 
+> **WP7 stack impact remediation (out-of-band, between AWP7 and the next
+> AWP):** the checked-out `ncs-aliro` stack advanced through its own WP7
+> (mailbox/EXCHANGE) after this application's AWP7 evidence below was
+> recorded, breaking the public `Mailbox` contract this application's AWP3/
+> AWP6 already implemented against. See `docs/wp7_stack_impact.md` for the
+> full breaking-change analysis, the code fix applied, and the verification
+> already performed for it (`mailbox` host suite: 28/28 pass;
+> `command_timing`/`host_smoke`/etc.: pass; DK build: pass; `ncs-aliro`
+> revision `e5022e21b694a400d6349772185380a1bb5c5e8d`). `worker_lifecycle`/
+> `authorization`/`cli_info` still fail to *link* in `native_sim`, but on
+> pre-existing, unrelated `Crypto`/`CredentialSigning` symbols already
+> documented in this file's AWP7 section, not on anything from this fix.
+> **A dated entry summarizing this has not yet been appended to this log
+> itself** (only to `docs/wp7_stack_impact.md`) - do that before trusting
+> the AWP6/AWP7 rows below as the most current status.
+
 ## AWP0 — Replace POC logic with the application skeleton
 
 ### Baseline

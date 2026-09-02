@@ -15,5 +15,10 @@ rsource "../../../../../applications/aliro-nfc-user-device/src/platform/nfc/Kcon
 rsource "../../../../../applications/aliro-nfc-user-device/src/platform/os/Kconfig"
 rsource "../../../../../applications/aliro-nfc-user-device/src/platform/authorization/Kconfig"
 rsource "../../../../../applications/aliro-nfc-user-device/src/storage/credential/Kconfig"
+# WP7 stack impact (see docs/wp7_stack_impact.md): the real
+# Aliro::UserDeviceStack now unconditionally calls
+# Aliro::Interface::UserDevice::Mailbox::*, so this test now also builds
+# storage/mailbox/*.cpp (see CMakeLists.txt) and needs its Kconfig options.
+rsource "../../../../../applications/aliro-nfc-user-device/src/storage/mailbox/Kconfig"
 
 source "Kconfig.zephyr"

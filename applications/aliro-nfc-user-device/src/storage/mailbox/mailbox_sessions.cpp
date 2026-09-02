@@ -79,6 +79,17 @@ AliroError OpenSnapshot(::Aliro::UserDevice::MailboxHandle handle, SessionHandle
 		return ALIRO_INVALID_ARGUMENT;
 	}
 
+	/*
+	 * WP7 stack impact (see docs/wp7_stack_impact.md), amendment A6: at
+	 * most one open snapshot per mailbox. Distinct ALIRO_INVALID_STATE
+	 * from the ALIRO_INVALID_ARGUMENT above (invalid/absent mailbox).
+	 */
+	for (const auto &session : sSessions) {
+		if (session.mActive && session.mCredentialHandle == credentialHandle) {
+			return ALIRO_INVALID_STATE;
+		}
+	}
+
 	Session *freeSlot{ nullptr };
 	for (auto &session : sSessions) {
 		if (!session.mActive) {
@@ -173,7 +184,7 @@ AliroError StageWrite(SessionHandle session, size_t offset, const uint8_t *data,
 	return ALIRO_NO_ERROR;
 }
 
-AliroError StageSet(SessionHandle session, const uint8_t *data, size_t length)
+AliroError StageSet(SessionHandle session, size_t offset, size_t length, uint8_t value)
 {
 	Lock lock;
 
@@ -192,14 +203,18 @@ AliroError StageSet(SessionHandle session, const uint8_t *data, size_t length)
 		return ALIRO_INVALID_STATE;
 	}
 
-	/* "Stage a full-mailbox set request" (interface.h): length must cover the entire provisioned mailbox. */
-	if (length != config.mSizeBytes) {
+	/*
+	 * WP7 stack impact (see docs/wp7_stack_impact.md), amendment A1:
+	 * fill [offset, offset + length) with a single repeated byte (Table
+	 * 8-16 0x95 set request), not a full-mailbox buffer as before.
+	 */
+	if (!InBounds(offset, length, config.mSizeBytes)) {
 		return ALIRO_INVALID_ARGUMENT;
 	}
 
 	for (size_t i = 0; i < length; ++i) {
-		found->mStaged[i] = data[i];
-		found->mDirty[i] = true;
+		found->mStaged[offset + i] = value;
+		found->mDirty[offset + i] = true;
 	}
 
 	return ALIRO_NO_ERROR;

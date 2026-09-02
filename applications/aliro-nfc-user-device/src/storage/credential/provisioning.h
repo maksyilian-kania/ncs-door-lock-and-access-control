@@ -27,7 +27,14 @@
 namespace AliroUd::Credential::Provisioning {
 
 constexpr uint32_t kMagic{ 0x414c5544 }; /* "ALUD" */
-constexpr uint32_t kVersion{ 1 };
+/*
+ * WP7 stack impact (see docs/wp7_stack_impact.md): bumped from 1 to 2 when
+ * MailboxConfig's shape changed (mSettableInAuth1 removed, mDataSubset*
+ * fields added). A stale v1 buffer must not be misinterpreted as v2, so a
+ * version bump - not a silent reinterpretation - is required whenever
+ * Payload's (transitive) layout changes.
+ */
+constexpr uint32_t kVersion{ 2 };
 
 /** @brief The exact wire payload; POD, safe to reinterpret directly over `ConstData` bytes. */
 struct Payload {

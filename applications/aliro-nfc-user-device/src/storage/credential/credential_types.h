@@ -41,6 +41,20 @@ constexpr size_t kDocumentMaxSizeBytes{ CONFIG_ALIRO_UD_DOCUMENT_MAX_SIZE };
 constexpr size_t kMaxPreferredBindings{ CONFIG_ALIRO_UD_MAX_PREFERRED_BINDINGS };
 
 /**
+ * @brief Maximum number of AUTH1 `mailbox_data_subset` (offset, length) pairs
+ * this application provisions per mailbox.
+ *
+ * WP7 stack impact (see `docs/wp7_stack_impact.md`): distinct from, and much
+ * smaller than, the checked-out `ncs-aliro` public
+ * `Aliro::UserDevice::kMaxMailboxDataSubsetPairs` (1863) - that constant is
+ * only the backend's *provisioning-time rejection limit* derived from the
+ * AUTH1 response-chaining budget, not a size this small-flash application
+ * must actually support. This Kconfig is this application's own, smaller,
+ * practical bound.
+ */
+constexpr size_t kMaxMailboxDataSubsetPairs{ CONFIG_ALIRO_UD_MAILBOX_MAX_DATA_SUBSET_PAIRS };
+
+/**
  * @brief Which trust material a `reader_group_identifier` binding carries
  * (APP_PLAN.md AWP3, WP5.5 decision D9): a directly-bound Reader public key,
  * or a Reader System Issuer CA public key used to validate certificates
@@ -64,13 +78,38 @@ struct Binding {
 	bool IsEmpty() const { return mTrustType == TrustType::None; }
 };
 
-/** @brief Staged/committed mailbox configuration (byte storage implemented in AWP6). */
+/**
+ * @brief One provisioned AUTH1 `mailbox_data_subset` (offset, length) pair.
+ *
+ * Aliro 1.0 Specification, section 8.3.1.15, page 61. Mirrors
+ * `Aliro::UserDevice::kMaxMailboxDataSubsetBytes`'s wire shape
+ * (`uint16_t` offset/length); see `docs/wp7_stack_impact.md`.
+ */
+struct MailboxDataSubsetPair {
+	uint16_t mOffset{ 0 };
+	uint16_t mLength{ 0 };
+};
+
+/**
+ * @brief Staged/committed mailbox configuration (byte storage implemented in AWP6).
+ *
+ * WP7 stack impact (see `docs/wp7_stack_impact.md`): `mSettableInAuth1` was
+ * removed - the checked-out `ncs-aliro` public
+ * `Aliro::UserDevice::MailboxPermissions` no longer has this field, because
+ * the AUTH1 `mailbox_data_subset` is read-only from the Reader's
+ * perspective (Aliro 1.0 Specification, section 8.3.1.15, page 61). The
+ * replacement concept, whether/what subset is provisioned, is carried by
+ * `mDataSubsetConfigured`/`mDataSubsetPairCount`/`mDataSubsetPairs` below.
+ */
 struct MailboxConfig {
 	bool mConfigured{ false };
 	uint32_t mSizeBytes{ 0 };
 	bool mReadable{ false };
 	bool mWritable{ false };
-	bool mSettableInAuth1{ false };
+	/** @brief Whether an AUTH1 `mailbox_data_subset` descriptor is provisioned at all (may have zero pairs). */
+	bool mDataSubsetConfigured{ false };
+	uint32_t mDataSubsetPairCount{ 0 };
+	std::array<MailboxDataSubsetPair, kMaxMailboxDataSubsetPairs> mDataSubsetPairs{};
 };
 
 /** @brief One optional, opaque, application-stored document (Access Document or Revocation Document). */

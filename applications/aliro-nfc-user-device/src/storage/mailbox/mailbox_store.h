@@ -65,6 +65,16 @@ struct Config {
 	bool mConfigured{ false };
 	uint32_t mSizeBytes{ 0 };
 	::Aliro::UserDevice::MailboxPermissions mPermissions{};
+	/*
+	 * WP7 stack impact (see docs/wp7_stack_impact.md): the AUTH1
+	 * mailbox_data_subset descriptor. Not a Reader read/write permission
+	 * (mPermissions above), so tracked separately; mirrors
+	 * AliroUd::Credential::MailboxConfig's mDataSubset* fields.
+	 */
+	bool mDataSubsetConfigured{ false };
+	uint32_t mDataSubsetPairCount{ 0 };
+	std::array<::AliroUd::Credential::MailboxDataSubsetPair, ::AliroUd::Credential::kMaxMailboxDataSubsetPairs>
+		mDataSubsetPairs{};
 };
 
 /** @brief Gets the live mailbox configuration for a credential handle. `ALIRO_INVALID_ARGUMENT` if the credential does not exist or has no mailbox configured. */

@@ -129,6 +129,36 @@ AliroError ValidatePayloadShape(const Provisioning::Payload &input)
 		return ALIRO_INVALID_ARGUMENT;
 	}
 
+	/*
+	 * WP7 stack impact (see docs/wp7_stack_impact.md): AUTH1
+	 * mailbox_data_subset provisioning. A subset descriptor is only
+	 * meaningful for a configured mailbox, and every pair must fit
+	 * within that mailbox's own provisioned size (Aliro 1.0
+	 * Specification, section 8.3.1.15, page 61: the subset describes
+	 * offsets/lengths *within* the mailbox).
+	 */
+	if (input.mMailbox.mDataSubsetConfigured) {
+		if (!input.mMailbox.mConfigured) {
+			LOG_WRN("mailbox_data_subset configured without a configured mailbox");
+			return ALIRO_INVALID_ARGUMENT;
+		}
+
+		if (input.mMailbox.mDataSubsetPairCount > kMaxMailboxDataSubsetPairs) {
+			LOG_WRN("mailbox_data_subset pair count %u exceeds capacity %zu",
+				input.mMailbox.mDataSubsetPairCount, kMaxMailboxDataSubsetPairs);
+			return ALIRO_INVALID_ARGUMENT;
+		}
+
+		for (uint32_t i = 0; i < input.mMailbox.mDataSubsetPairCount; ++i) {
+			const auto &pair = input.mMailbox.mDataSubsetPairs[i];
+			if (static_cast<uint32_t>(pair.mOffset) + pair.mLength > input.mMailbox.mSizeBytes) {
+				LOG_WRN("mailbox_data_subset pair %u [%u,+%u) exceeds mailbox size %u", i, pair.mOffset,
+					pair.mLength, input.mMailbox.mSizeBytes);
+				return ALIRO_INVALID_ARGUMENT;
+			}
+		}
+	}
+
 	if (input.mAccessDocument.mPresent && input.mAccessDocument.mLength > kDocumentMaxSizeBytes) {
 		return ALIRO_INVALID_ARGUMENT;
 	}

@@ -47,8 +47,8 @@ std::array<uint8_t, 32> KeyScalar(uint8_t seed)
 	return scalar;
 }
 
-CredentialHandle SeedCredentialWithMailbox(uint32_t sizeBytes, bool readable, bool writable, bool settableInAuth1,
-					   uint8_t keySeed = 0x12)
+/* WP7 stack impact (see docs/wp7_stack_impact.md): the removed-upstream settable-in-AUTH1 parameter was dropped here too. */
+CredentialHandle SeedCredentialWithMailbox(uint32_t sizeBytes, bool readable, bool writable, uint8_t keySeed = 0x12)
 {
 	ReaderGroupIdentifier readerGroupId{};
 	readerGroupId.fill(0x11);
@@ -69,7 +69,6 @@ CredentialHandle SeedCredentialWithMailbox(uint32_t sizeBytes, bool readable, bo
 	payload.mMailbox.mSizeBytes = sizeBytes;
 	payload.mMailbox.mReadable = readable;
 	payload.mMailbox.mWritable = writable;
-	payload.mMailbox.mSettableInAuth1 = settableInAuth1;
 
 	CredentialHandle handle{ kInvalidCredentialHandle };
 	const auto error = AliroUd::Credential::Store::Create(payload, handle);
@@ -106,7 +105,7 @@ ZTEST_SUITE(aliro_ud_mailbox_store, nullptr, nullptr, ResetBeforeEachTest, nullp
 
 ZTEST(aliro_ud_mailbox_store, test_get_config_reflects_live_credential_provisioning)
 {
-	const auto handle = SeedCredentialWithMailbox(64, /*readable=*/true, /*writable=*/false, /*settable=*/false);
+	const auto handle = SeedCredentialWithMailbox(64, /*readable=*/true, /*writable=*/false);
 
 	AliroUd::Mailbox::Store::Config config{};
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Store::GetConfig(handle, config));
@@ -114,7 +113,10 @@ ZTEST(aliro_ud_mailbox_store, test_get_config_reflects_live_credential_provision
 	zassert_equal(64U, config.mSizeBytes);
 	zassert_true(config.mPermissions.mReadable);
 	zassert_false(config.mPermissions.mWritable);
-	zassert_false(config.mPermissions.mSettableInAuth1);
+	/* WP7 stack impact (see docs/wp7_stack_impact.md): mSettableInAuth1 no longer exists; no
+	 * mailbox_data_subset was staged by SeedCredentialWithMailbox(), so it must read as unconfigured. */
+	zassert_false(config.mDataSubsetConfigured);
+	zassert_equal(0U, config.mDataSubsetPairCount);
 }
 
 ZTEST(aliro_ud_mailbox_store, test_get_config_rejects_credential_without_mailbox)
@@ -134,7 +136,7 @@ ZTEST(aliro_ud_mailbox_store, test_get_config_rejects_unknown_handle)
 
 ZTEST(aliro_ud_mailbox_store, test_initialize_is_idempotent_and_zero_fills)
 {
-	const auto handle = SeedCredentialWithMailbox(16, true, true, false);
+	const auto handle = SeedCredentialWithMailbox(16, true, true);
 
 	zassert_false(AliroUd::Mailbox::Store::IsInitialized(handle));
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Store::Initialize(handle));
@@ -160,7 +162,7 @@ ZTEST(aliro_ud_mailbox_store, test_initialize_is_idempotent_and_zero_fills)
 
 ZTEST(aliro_ud_mailbox_store, test_reset_re_zeroes_even_if_already_initialized)
 {
-	const auto handle = SeedCredentialWithMailbox(16, true, true, false);
+	const auto handle = SeedCredentialWithMailbox(16, true, true);
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Store::Initialize(handle));
 
 	std::array<bool, AliroUd::Mailbox::kMaxSizeBytes> dirty{};
@@ -177,7 +179,7 @@ ZTEST(aliro_ud_mailbox_store, test_reset_re_zeroes_even_if_already_initialized)
 
 ZTEST(aliro_ud_mailbox_store, test_raw_read_rejects_out_of_bounds_and_overflowing_ranges)
 {
-	const auto handle = SeedCredentialWithMailbox(16, true, true, false);
+	const auto handle = SeedCredentialWithMailbox(16, true, true);
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Store::Initialize(handle));
 
 	std::array<uint8_t, 16> data{};
@@ -191,7 +193,7 @@ ZTEST(aliro_ud_mailbox_store, test_raw_read_rejects_out_of_bounds_and_overflowin
 
 ZTEST(aliro_ud_mailbox_store, test_apply_dirty_bytes_only_touches_dirty_offsets)
 {
-	const auto handle = SeedCredentialWithMailbox(8, true, true, false);
+	const auto handle = SeedCredentialWithMailbox(8, true, true);
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Store::Initialize(handle));
 
 	std::array<bool, AliroUd::Mailbox::kMaxSizeBytes> dirty{};
@@ -209,7 +211,7 @@ ZTEST(aliro_ud_mailbox_store, test_apply_dirty_bytes_only_touches_dirty_offsets)
 
 ZTEST(aliro_ud_mailbox_store, test_erase_for_credential_clears_committed_data)
 {
-	const auto handle = SeedCredentialWithMailbox(8, true, true, false);
+	const auto handle = SeedCredentialWithMailbox(8, true, true);
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Store::Initialize(handle));
 
 	std::array<bool, AliroUd::Mailbox::kMaxSizeBytes> dirty{};
@@ -230,7 +232,7 @@ ZTEST(aliro_ud_mailbox_store, test_erase_for_credential_clears_committed_data)
 	 * leak into the new one.
 	 */
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Credential::Store::Delete(handle));
-	const auto newHandle = SeedCredentialWithMailbox(8, true, true, false, /*keySeed=*/0x99);
+	const auto newHandle = SeedCredentialWithMailbox(8, true, true, /*keySeed=*/0x99);
 	zassert_equal(handle, newHandle, "the fake credential backend is expected to reuse the freed slot");
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Store::Initialize(newHandle));
 	zassert_false(AliroUd::Mailbox::Store::HasNonZeroData(newHandle),
@@ -239,8 +241,8 @@ ZTEST(aliro_ud_mailbox_store, test_erase_for_credential_clears_committed_data)
 
 ZTEST(aliro_ud_mailbox_store, test_erase_all_clears_every_slot)
 {
-	const auto handleA = SeedCredentialWithMailbox(8, true, true, false, 0x01);
-	const auto handleB = SeedCredentialWithMailbox(8, true, true, false, 0x02);
+	const auto handleA = SeedCredentialWithMailbox(8, true, true, 0x01);
+	const auto handleB = SeedCredentialWithMailbox(8, true, true, 0x02);
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Store::Initialize(handleA));
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Store::Initialize(handleB));
 
@@ -252,7 +254,7 @@ ZTEST(aliro_ud_mailbox_store, test_erase_all_clears_every_slot)
 
 ZTEST(aliro_ud_mailbox_store, test_persists_across_reboot_simulation)
 {
-	const auto handle = SeedCredentialWithMailbox(8, true, true, false);
+	const auto handle = SeedCredentialWithMailbox(8, true, true);
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Store::Initialize(handle));
 
 	std::array<bool, AliroUd::Mailbox::kMaxSizeBytes> dirty{};

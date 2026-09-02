@@ -52,8 +52,8 @@ std::array<uint8_t, 32> KeyScalar(uint8_t seed)
 	return scalar;
 }
 
-CredentialHandle SeedCredentialWithMailbox(uint32_t sizeBytes, bool readable, bool writable, bool settableInAuth1,
-					   uint8_t keySeed = 0x12)
+/* WP7 stack impact (see docs/wp7_stack_impact.md): the removed-upstream settable-in-AUTH1 parameter was dropped here too. */
+CredentialHandle SeedCredentialWithMailbox(uint32_t sizeBytes, bool readable, bool writable, uint8_t keySeed = 0x12)
 {
 	ReaderGroupIdentifier readerGroupId{};
 	readerGroupId.fill(0x11);
@@ -74,7 +74,6 @@ CredentialHandle SeedCredentialWithMailbox(uint32_t sizeBytes, bool readable, bo
 	payload.mMailbox.mSizeBytes = sizeBytes;
 	payload.mMailbox.mReadable = readable;
 	payload.mMailbox.mWritable = writable;
-	payload.mMailbox.mSettableInAuth1 = settableInAuth1;
 
 	CredentialHandle handle{ kInvalidCredentialHandle };
 	const auto error = AliroUd::Credential::Store::Create(payload, handle);
@@ -101,7 +100,7 @@ ZTEST(aliro_ud_mailbox_sessions, test_open_snapshot_rejects_credential_without_c
 
 ZTEST(aliro_ud_mailbox_sessions, test_open_snapshot_lazily_initializes_committed_storage)
 {
-	const auto handle = SeedCredentialWithMailbox(8, true, true, false);
+	const auto handle = SeedCredentialWithMailbox(8, true, true);
 	zassert_false(AliroUd::Mailbox::Store::IsInitialized(handle));
 
 	AliroUd::Mailbox::Sessions::SessionHandle session{};
@@ -114,7 +113,7 @@ ZTEST(aliro_ud_mailbox_sessions, test_open_snapshot_lazily_initializes_committed
 
 ZTEST(aliro_ud_mailbox_sessions, test_read_isolated_from_staged_writes_until_commit)
 {
-	const auto handle = SeedCredentialWithMailbox(8, /*readable=*/true, /*writable=*/true, false);
+	const auto handle = SeedCredentialWithMailbox(8, /*readable=*/true, /*writable=*/true);
 
 	AliroUd::Mailbox::Sessions::SessionHandle session{};
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::OpenSnapshot(MailboxHandleOf(handle), session));
@@ -137,7 +136,7 @@ ZTEST(aliro_ud_mailbox_sessions, test_read_isolated_from_staged_writes_until_com
 
 ZTEST(aliro_ud_mailbox_sessions, test_rollback_and_close_leave_committed_bytes_unchanged)
 {
-	const auto handle = SeedCredentialWithMailbox(8, true, true, false);
+	const auto handle = SeedCredentialWithMailbox(8, true, true);
 
 	AliroUd::Mailbox::Sessions::SessionHandle session{};
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::OpenSnapshot(MailboxHandleOf(handle), session));
@@ -174,7 +173,7 @@ ZTEST(aliro_ud_mailbox_sessions, test_rollback_and_close_leave_committed_bytes_u
 
 ZTEST(aliro_ud_mailbox_sessions, test_read_rejected_when_not_readable)
 {
-	const auto handle = SeedCredentialWithMailbox(8, /*readable=*/false, /*writable=*/true, false);
+	const auto handle = SeedCredentialWithMailbox(8, /*readable=*/false, /*writable=*/true);
 
 	AliroUd::Mailbox::Sessions::SessionHandle session{};
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::OpenSnapshot(MailboxHandleOf(handle), session));
@@ -187,7 +186,7 @@ ZTEST(aliro_ud_mailbox_sessions, test_read_rejected_when_not_readable)
 
 ZTEST(aliro_ud_mailbox_sessions, test_stage_write_rejected_when_not_writable)
 {
-	const auto handle = SeedCredentialWithMailbox(8, /*readable=*/true, /*writable=*/false, false);
+	const auto handle = SeedCredentialWithMailbox(8, /*readable=*/true, /*writable=*/false);
 
 	AliroUd::Mailbox::Sessions::SessionHandle session{};
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::OpenSnapshot(MailboxHandleOf(handle), session));
@@ -200,7 +199,7 @@ ZTEST(aliro_ud_mailbox_sessions, test_stage_write_rejected_when_not_writable)
 
 ZTEST(aliro_ud_mailbox_sessions, test_stage_write_rejects_out_of_bounds_and_overflowing_ranges)
 {
-	const auto handle = SeedCredentialWithMailbox(8, true, true, false);
+	const auto handle = SeedCredentialWithMailbox(8, true, true);
 
 	AliroUd::Mailbox::Sessions::SessionHandle session{};
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::OpenSnapshot(MailboxHandleOf(handle), session));
@@ -215,52 +214,84 @@ ZTEST(aliro_ud_mailbox_sessions, test_stage_write_rejects_out_of_bounds_and_over
 	AliroUd::Mailbox::Sessions::Close(session);
 }
 
-ZTEST(aliro_ud_mailbox_sessions, test_stage_set_requires_exact_full_mailbox_length)
+/*
+ * WP7 stack impact (see docs/wp7_stack_impact.md), amendment A1 (breaking
+ * change): StageSet() now fills [offset, offset + length) with a single
+ * repeated byte (Table 8-16 0x95 set request), not a full-mailbox buffer.
+ */
+ZTEST(aliro_ud_mailbox_sessions, test_stage_set_fills_range_with_repeated_byte)
 {
-	const auto handle = SeedCredentialWithMailbox(4, true, true, false);
+	const auto handle = SeedCredentialWithMailbox(4, true, true);
 
 	AliroUd::Mailbox::Sessions::SessionHandle session{};
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::OpenSnapshot(MailboxHandleOf(handle), session));
 
-	const std::array<uint8_t, 3> tooShort{};
-	zassert_equal(ALIRO_INVALID_ARGUMENT, AliroUd::Mailbox::Sessions::StageSet(session, tooShort.data(), 3));
+	/* Out-of-bounds and overflowing ranges are rejected, mirroring StageWrite()'s bounds checks. */
+	zassert_equal(ALIRO_INVALID_ARGUMENT, AliroUd::Mailbox::Sessions::StageSet(session, 3, 2, 0x7));
+	zassert_equal(ALIRO_INVALID_ARGUMENT, AliroUd::Mailbox::Sessions::StageSet(session, 4, 1, 0x7));
+	zassert_equal(ALIRO_INVALID_ARGUMENT, AliroUd::Mailbox::Sessions::StageSet(session, SIZE_MAX - 1, 4, 0x7));
 
-	const std::array<uint8_t, 4> exact{ 0x7, 0x7, 0x7, 0x7 };
-	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::StageSet(session, exact.data(), 4));
+	/* A partial-range fill leaves the rest of the mailbox untouched. */
+	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::StageSet(session, 1, 2, 0x7));
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::Commit(session));
 
 	std::array<uint8_t, 4> readBack{};
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::Read(session, 0, readBack.data(), readBack.size()));
-	zassert_true(readBack == exact);
+	const std::array<uint8_t, 4> expected{ 0x00, 0x7, 0x7, 0x00 };
+	zassert_true(readBack == expected);
 
 	AliroUd::Mailbox::Sessions::Close(session);
 }
 
-ZTEST(aliro_ud_mailbox_sessions, test_multiple_sessions_stage_independently)
+/*
+ * WP7 stack impact (see docs/wp7_stack_impact.md), amendment A6 (breaking
+ * behavior change): a conforming backend supports at most one open
+ * snapshot per mailbox. This replaces the pre-WP7 "multiple sessions stage
+ * independently" test, which relied on opening two concurrent sessions
+ * against the *same* mailbox handle - now explicitly rejected.
+ */
+ZTEST(aliro_ud_mailbox_sessions, test_second_open_snapshot_on_same_mailbox_is_rejected)
 {
-	const auto handle = SeedCredentialWithMailbox(4, true, true, false);
+	const auto handle = SeedCredentialWithMailbox(4, true, true);
+
+	AliroUd::Mailbox::Sessions::SessionHandle sessionA{};
+	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::OpenSnapshot(MailboxHandleOf(handle), sessionA));
+
+	AliroUd::Mailbox::Sessions::SessionHandle sessionB{};
+	zassert_equal(ALIRO_INVALID_STATE, AliroUd::Mailbox::Sessions::OpenSnapshot(MailboxHandleOf(handle), sessionB),
+		     "a second concurrent snapshot on the same mailbox must be rejected (amendment A6)");
+	zassert_equal(AliroUd::Mailbox::Sessions::kInvalidSessionHandle, sessionB);
+
+	/* Closing the first session frees the mailbox for a new snapshot. */
+	AliroUd::Mailbox::Sessions::Close(sessionA);
+	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::OpenSnapshot(MailboxHandleOf(handle), sessionB));
+	AliroUd::Mailbox::Sessions::Close(sessionB);
+}
+
+/* Two different mailboxes may each have their own concurrently open session. */
+ZTEST(aliro_ud_mailbox_sessions, test_sessions_on_different_mailboxes_stage_independently)
+{
+	const auto handleA = SeedCredentialWithMailbox(4, true, true, /*keySeed=*/0x01);
+	const auto handleB = SeedCredentialWithMailbox(4, true, true, /*keySeed=*/0x02);
 
 	AliroUd::Mailbox::Sessions::SessionHandle sessionA{};
 	AliroUd::Mailbox::Sessions::SessionHandle sessionB{};
-	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::OpenSnapshot(MailboxHandleOf(handle), sessionA));
-	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::OpenSnapshot(MailboxHandleOf(handle), sessionB));
+	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::OpenSnapshot(MailboxHandleOf(handleA), sessionA));
+	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::OpenSnapshot(MailboxHandleOf(handleB), sessionB));
 	zassert_not_equal(sessionA, sessionB);
 
 	uint8_t byteA{ 0xAA };
 	uint8_t byteB{ 0xBB };
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::StageWrite(sessionA, 0, &byteA, 1));
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::StageWrite(sessionB, 0, &byteB, 1));
-
-	/* Only sessionA's staged byte is committed; sessionB's own staged copy must be unaffected. */
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::Commit(sessionA));
+	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::Commit(sessionB));
 
 	uint8_t readBack{};
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::Read(sessionA, 0, &readBack, 1));
 	zassert_equal(0xAA, readBack);
-
-	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::Commit(sessionB));
-	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::Read(sessionA, 0, &readBack, 1));
-	zassert_equal(0xBB, readBack, "sessionB's independently staged byte must win once it commits");
+	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::Read(sessionB, 0, &readBack, 1));
+	zassert_equal(0xBB, readBack, "each mailbox's own session must stage/commit independently of the other's");
 
 	AliroUd::Mailbox::Sessions::Close(sessionA);
 	AliroUd::Mailbox::Sessions::Close(sessionB);
@@ -279,7 +310,7 @@ ZTEST(aliro_ud_mailbox_sessions, test_operations_on_unknown_session_fail_safely)
 
 ZTEST(aliro_ud_mailbox_sessions, test_shrinking_mailbox_mid_session_is_reflected_immediately)
 {
-	const auto handle = SeedCredentialWithMailbox(8, true, true, false);
+	const auto handle = SeedCredentialWithMailbox(8, true, true);
 
 	AliroUd::Mailbox::Sessions::SessionHandle session{};
 	zassert_equal(ALIRO_NO_ERROR, AliroUd::Mailbox::Sessions::OpenSnapshot(MailboxHandleOf(handle), session));
@@ -311,20 +342,60 @@ ZTEST(aliro_ud_mailbox_sessions, test_shrinking_mailbox_mid_session_is_reflected
  */
 ZTEST(aliro_ud_mailbox_sessions, test_interface_adapter_forwards_to_sessions_engine)
 {
-	const auto handle = SeedCredentialWithMailbox(4, true, true, false);
+	const auto handle = SeedCredentialWithMailbox(4, true, true);
 
 	Interface::UserDevice::Mailbox::SessionHandle session{ Interface::UserDevice::Mailbox::kInvalidSessionHandle };
 	zassert_equal(ALIRO_NO_ERROR, Interface::UserDevice::Mailbox::OpenSnapshot(MailboxHandleOf(handle), session));
 	zassert_not_equal(Interface::UserDevice::Mailbox::kInvalidSessionHandle, session);
 
-	const std::array<uint8_t, 4> full{ 0x9, 0x9, 0x9, 0x9 };
-	zassert_equal(ALIRO_NO_ERROR, Interface::UserDevice::Mailbox::StageSet(session, full.data(), full.size()));
+	/* WP7 stack impact (see docs/wp7_stack_impact.md), amendment A1: StageSet(session, offset, length, value). */
+	zassert_equal(ALIRO_NO_ERROR, Interface::UserDevice::Mailbox::StageSet(session, 0, 4, 0x9));
 	zassert_equal(ALIRO_NO_ERROR, Interface::UserDevice::Mailbox::Commit(session));
 
 	std::array<uint8_t, 4> readBack{};
 	zassert_equal(ALIRO_NO_ERROR,
 		     Interface::UserDevice::Mailbox::Read(session, 0, readBack.data(), readBack.size()));
+	const std::array<uint8_t, 4> full{ 0x9, 0x9, 0x9, 0x9 };
 	zassert_true(readBack == full);
 
 	Interface::UserDevice::Mailbox::Close(session);
+}
+
+/*
+ * WP7 stack impact (see docs/wp7_stack_impact.md): the five new
+ * Aliro::Interface::UserDevice::Mailbox contract functions added upstream
+ * in WP7-S2/WP7-S8, exercised through the real mailbox.cpp adapter.
+ */
+ZTEST(aliro_ud_mailbox_sessions, test_interface_adapter_resolve_and_metadata_functions)
+{
+	const auto handle = SeedCredentialWithMailbox(4, /*readable=*/true, /*writable=*/false);
+	const auto mailboxHandle = MailboxHandleOf(handle);
+
+	::Aliro::UserDevice::MailboxHandle resolved{ ::Aliro::UserDevice::kInvalidMailboxHandle };
+	zassert_equal(ALIRO_NO_ERROR, Interface::UserDevice::Mailbox::ResolveForCredential(handle, resolved));
+	zassert_equal(mailboxHandle, resolved);
+
+	::Aliro::UserDevice::MailboxHandle notResolved{ ::Aliro::UserDevice::kInvalidMailboxHandle };
+	zassert_not_equal(ALIRO_NO_ERROR,
+			 Interface::UserDevice::Mailbox::ResolveForCredential(kInvalidCredentialHandle, notResolved));
+	zassert_equal(::Aliro::UserDevice::kInvalidMailboxHandle, notResolved);
+
+	::Aliro::UserDevice::MailboxMetadata metadata{};
+	zassert_equal(ALIRO_NO_ERROR, Interface::UserDevice::Mailbox::GetMetadata(mailboxHandle, metadata));
+	zassert_equal(mailboxHandle, metadata.mHandle);
+	zassert_equal(4U, metadata.mSizeBytes);
+	zassert_true(metadata.mPermissions.mReadable);
+	zassert_false(metadata.mPermissions.mWritable);
+
+	bool hasNonZeroData{ true };
+	zassert_equal(ALIRO_NO_ERROR, Interface::UserDevice::Mailbox::HasNonZeroData(mailboxHandle, hasNonZeroData));
+	zassert_false(hasNonZeroData, "a freshly seeded mailbox has no committed data yet");
+
+	/* No mailbox_data_subset was staged by SeedCredentialWithMailbox(): must read as unconfigured. */
+	bool configured{ true };
+	size_t count{ 123 };
+	zassert_equal(ALIRO_NO_ERROR,
+		     Interface::UserDevice::Mailbox::GetMailboxDataSubsetPairCount(mailboxHandle, configured, count));
+	zassert_false(configured);
+	zassert_equal(0U, count);
 }

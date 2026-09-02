@@ -36,6 +36,17 @@ target_sources(app PRIVATE
   ${ALIRO_UD_APP_SRC_DIR}/storage/credential/credential_store.cpp
   ${ALIRO_UD_TEST_COMMON_DIR}/fake_credential_persistence.cpp
   ${ALIRO_UD_TEST_COMMON_DIR}/fake_key_backend.cpp
+  # WP7 stack impact (see docs/wp7_stack_impact.md): the real
+  # Aliro::UserDeviceStack now unconditionally calls
+  # Aliro::Interface::UserDevice::Mailbox::* from
+  # UserDeviceStateMachine::HandleAuth1()/HandleExchange() (WP7-S7),
+  # even for this test's SELECT-only traffic's session teardown path -
+  # same reason platform/crypto/*.cpp had to be added here (see "External
+  # stack observations" in docs/evidence.md's AWP7 section).
+  ${ALIRO_UD_APP_SRC_DIR}/storage/mailbox/mailbox.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/storage/mailbox/mailbox_sessions.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/storage/mailbox/mailbox_store.cpp
+  ${ALIRO_UD_TEST_COMMON_DIR}/fake_mailbox_persistence.cpp
   ${ALIRO_UD_APP_SRC_DIR}/platform/authorization/authorization.cpp
   ${ALIRO_UD_APP_SRC_DIR}/platform/authorization/authorization_window.cpp
   ${ALIRO_UD_TEST_COMMON_DIR}/fake_authorization_indicator.cpp

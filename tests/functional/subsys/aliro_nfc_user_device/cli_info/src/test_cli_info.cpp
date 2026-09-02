@@ -122,6 +122,7 @@ ZTEST(aliro_ud_cli_info, test_credential_setters_require_open_transaction)
 		"aliro-ud credential set-binding 0 00 direct 00",
 		"aliro-ud credential set-policy 1",
 		"aliro-ud credential set-mailbox 512 3",
+		"aliro-ud credential set-mailbox-data-subset 0 0 1",
 		"aliro-ud credential set-credential-timestamp 00",
 		"aliro-ud credential set-revocation-timestamp 00",
 		"aliro-ud credential commit",
@@ -218,9 +219,13 @@ ZTEST(aliro_ud_cli_info, test_mailbox_inspect_init_read_and_erase_on_delete)
 	zassert_true(RunCommand("aliro-ud credential commit").find("OK handle=") != std::string::npos,
 		     "commit should succeed");
 
+	/*
+	 * WP7 stack impact (see docs/wp7_stack_impact.md): "settable_in_auth1"
+	 * is gone; "data_subset_configured"/"data_subset_pairs" replace it.
+	 */
 	const std::string inspectBeforeInit{ RunCommand("aliro-ud mailbox inspect 1") };
-	zassert_true(inspectBeforeInit.find("OK handle=1 size=8 readable=1 writable=1 settable_in_auth1=0") !=
-			     std::string::npos,
+	zassert_true(inspectBeforeInit.find("OK handle=1 size=8 readable=1 writable=1 data_subset_configured=0 "
+					     "data_subset_pairs=0") != std::string::npos,
 		     "expected the staged mailbox configuration, got: %s", inspectBeforeInit.c_str());
 	zassert_true(inspectBeforeInit.find("initialized=0") != std::string::npos,
 		     "mailbox should not be initialized before 'mailbox init', got: %s",
@@ -246,6 +251,39 @@ ZTEST(aliro_ud_cli_info, test_mailbox_inspect_init_read_and_erase_on_delete)
 	zassert_true(inspectAfterDelete.find("ERR") != std::string::npos,
 		     "inspecting a deleted credential's mailbox should fail, got: %s",
 		     inspectAfterDelete.c_str());
+}
+
+/**
+ * @brief "credential set-mailbox-data-subset" (WP7 stack impact; see
+ * docs/wp7_stack_impact.md) stages an AUTH1 mailbox_data_subset (offset,
+ * length) pair, visible through "mailbox inspect" once committed.
+ */
+ZTEST(aliro_ud_cli_info, test_mailbox_data_subset_staging_and_inspect)
+{
+	static const char *const kKeyHex{ "23231022a3662ceb6f2e6a4e998866ae88d6e9da1c72b050ae5c206a1da46712" };
+	static const char *const kReaderGroupIdentifierHex{ "0102030405060708090a0b0c0d0e0f10" };
+	static const char *const kTrustAnchorKeyHex{
+		"04"
+		"1111111111111111111111111111111111111111111111111111111111111111"
+		"2222222222222222222222222222222222222222222222222222222222222222"
+	};
+
+	RunCommand("aliro-ud credential begin-create");
+	RunCommand((std::string("aliro-ud credential set-key ") + kKeyHex).c_str());
+	RunCommand("aliro-ud credential set-policy 1");
+	RunCommand((std::string("aliro-ud credential set-binding 0 ") + kReaderGroupIdentifierHex + " direct " +
+		    kTrustAnchorKeyHex)
+			   .c_str());
+	zassert_true(RunCommand("aliro-ud credential set-mailbox 8 3").find("OK") != std::string::npos,
+		     "set-mailbox should succeed");
+	zassert_true(RunCommand("aliro-ud credential set-mailbox-data-subset 0 2 4").find("OK") != std::string::npos,
+		     "set-mailbox-data-subset should succeed for a pair within the mailbox's provisioned size");
+	zassert_true(RunCommand("aliro-ud credential commit").find("OK handle=") != std::string::npos,
+		     "commit should succeed");
+
+	const std::string inspectOutput{ RunCommand("aliro-ud mailbox inspect 1") };
+	zassert_true(inspectOutput.find("data_subset_configured=1 data_subset_pairs=1") != std::string::npos,
+		     "expected one configured mailbox_data_subset pair, got: %s", inspectOutput.c_str());
 }
 
 /**

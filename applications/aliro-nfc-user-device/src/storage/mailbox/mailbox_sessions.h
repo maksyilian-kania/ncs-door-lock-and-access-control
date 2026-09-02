@@ -43,10 +43,22 @@ namespace AliroUd::Mailbox::Sessions {
 using SessionHandle = ::Aliro::Interface::UserDevice::Mailbox::SessionHandle;
 constexpr SessionHandle kInvalidSessionHandle{ ::Aliro::Interface::UserDevice::Mailbox::kInvalidSessionHandle };
 
+/*
+ * WP7 stack impact (see docs/wp7_stack_impact.md), amendment A6: a
+ * conforming backend supports at most one open snapshot per mailbox.
+ * OpenSnapshot() returns ALIRO_INVALID_STATE (distinct from
+ * ALIRO_INVALID_ARGUMENT for an invalid/absent mailbox) if a session is
+ * already open for the requested handle.
+ */
 AliroError OpenSnapshot(::Aliro::UserDevice::MailboxHandle handle, SessionHandle &outSession);
 AliroError Read(SessionHandle session, size_t offset, uint8_t *outData, size_t length);
 AliroError StageWrite(SessionHandle session, size_t offset, const uint8_t *data, size_t length);
-AliroError StageSet(SessionHandle session, const uint8_t *data, size_t length);
+/*
+ * WP7 stack impact, amendment A1 (breaking change): fills [offset, offset +
+ * length) with a single repeated byte (Table 8-16 0x95 set request), not a
+ * full-mailbox multi-byte buffer as before.
+ */
+AliroError StageSet(SessionHandle session, size_t offset, size_t length, uint8_t value);
 AliroError Commit(SessionHandle session);
 AliroError Rollback(SessionHandle session);
 void Close(SessionHandle session);

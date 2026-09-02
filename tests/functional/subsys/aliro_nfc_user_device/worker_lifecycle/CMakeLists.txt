@@ -41,6 +41,15 @@ target_sources(app PRIVATE
   ${ALIRO_UD_APP_SRC_DIR}/storage/credential/credential_store.cpp
   ${ALIRO_UD_TEST_COMMON_DIR}/fake_credential_persistence.cpp
   ${ALIRO_UD_TEST_COMMON_DIR}/fake_key_backend.cpp
+  # WP7 stack impact (see docs/wp7_stack_impact.md): the real
+  # Aliro::UserDeviceStack now unconditionally calls
+  # Aliro::Interface::UserDevice::Mailbox::* from
+  # UserDeviceStateMachine::HandleAuth1()/HandleExchange() (WP7-S7), even
+  # for SELECT-only traffic's session teardown path.
+  ${ALIRO_UD_APP_SRC_DIR}/storage/mailbox/mailbox.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/storage/mailbox/mailbox_sessions.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/storage/mailbox/mailbox_store.cpp
+  ${ALIRO_UD_TEST_COMMON_DIR}/fake_mailbox_persistence.cpp
   # Aliro::Interface::UserDevice::Authorization adapter (AWP4) and its real
   # authorization_window.cpp state machine; authorization_button.cpp/
   # authorization_led.cpp (DK-hardware-only GPIO) are excluded, substituted
