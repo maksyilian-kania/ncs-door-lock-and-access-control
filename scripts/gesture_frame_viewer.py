@@ -10,7 +10,7 @@ Reads frames streamed by CONFIG_DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING
 native USB CDC ACM port, and displays each one with a circle drawn over
 every detected grid cell (FOMO may report more than one) and its
 confidence, over a grid outline matching the model's output tensor -
-useful for tuning CONFIG_DOOR_LOCK_GESTURE_ACCESS_MODEL's threshold.
+useful for tuning CONFIG_DOOR_LOCK_GESTURE_ACCESS_DETECTION_THRESHOLD_MILLI.
 
 The device only forwards its raw per-frame result, not the debounced
 detection state it uses to decide when to unlock (see HandleDetectionResult()

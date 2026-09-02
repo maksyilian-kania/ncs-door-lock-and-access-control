@@ -10,7 +10,7 @@
 #include "frame_forwarding.h"
 #endif // CONFIG_DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING
 
-#include <gesture_access_model/gesture_access_model.h>
+#include "gesture_access_model.h"
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -99,6 +99,33 @@ void ExtractGrayscale(const video_buffer &vbuf, size_t &grayscaleBytesFilled)
 	grayscaleBytesFilled += samples;
 }
 
+#ifdef CONFIG_DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING
+void ForwardFrameIfHostReady(const Model::Result &result)
+{
+	if (!FrameForwarding::HostReady()) {
+		return;
+	}
+
+	char meta[256];
+	int offset = snprintf(meta, sizeof(meta), "{\"det\":%d,\"conf\":%u,\"us\":%u,\"pts\":[",
+			       result.detected, result.confidenceMilli, result.inferenceTimeUs);
+
+	for (size_t i = 0; i < result.detectionCount && offset > 0 && (size_t)offset < sizeof(meta); i++) {
+		offset += snprintf(&meta[offset], sizeof(meta) - (size_t)offset,
+				    "%s{\"x\":%u,\"y\":%u,\"conf\":%u}", i ? "," : "", result.detections[i].x,
+				    result.detections[i].y, result.detections[i].confidenceMilli);
+	}
+
+	if (offset > 0 && (size_t)offset < sizeof(meta) - 2) {
+		offset += snprintf(&meta[offset], sizeof(meta) - (size_t)offset, "]}");
+	}
+
+	if (offset > 0 && (size_t)offset < sizeof(meta)) {
+		FrameForwarding::Send(kFrameWidth, kFrameHeight, sGrayscaleFrame, meta, static_cast<size_t>(offset));
+	}
+}
+#endif // CONFIG_DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING
+
 int CaptureAndInferOneFrame()
 {
 	size_t grayscaleBytesFilled = 0;
@@ -132,27 +159,7 @@ int CaptureAndInferOneFrame()
 	UpdateDebounce(result.detected);
 
 #ifdef CONFIG_DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING
-	if (FrameForwarding::HostReady()) {
-		char meta[256];
-		int offset = snprintf(meta, sizeof(meta), "{\"det\":%d,\"conf\":%u,\"us\":%u,\"pts\":[",
-				       result.detected, result.confidenceMilli, result.inferenceTimeUs);
-
-		for (size_t i = 0; i < result.detectionCount && offset > 0 && (size_t)offset < sizeof(meta); i++) {
-			offset += snprintf(&meta[offset], sizeof(meta) - (size_t)offset,
-					    "%s{\"x\":%u,\"y\":%u,\"conf\":%u}", i ? "," : "",
-					    result.detections[i].x, result.detections[i].y,
-					    result.detections[i].confidenceMilli);
-		}
-
-		if (offset > 0 && (size_t)offset < sizeof(meta) - 2) {
-			offset += snprintf(&meta[offset], sizeof(meta) - (size_t)offset, "]}");
-		}
-
-		if (offset > 0 && (size_t)offset < sizeof(meta)) {
-			FrameForwarding::Send(kFrameWidth, kFrameHeight, sGrayscaleFrame, meta,
-					      static_cast<size_t>(offset));
-		}
-	}
+	ForwardFrameIfHostReady(result);
 #endif // CONFIG_DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING
 
 	return 0;

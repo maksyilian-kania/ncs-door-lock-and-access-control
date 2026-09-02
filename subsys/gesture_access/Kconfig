@@ -6,13 +6,27 @@
 
 menuconfig DOOR_LOCK_GESTURE_ACCESS
 	bool "Door Lock gesture access (SPI camera + on-device inference)"
-	select DOOR_LOCK_GESTURE_ACCESS_MODEL
+	select CPP
+	select NRF_AXON
 	help
 	  Enables gesture-based access control using an SPI camera and
-	  on-device inference from the nRF Edge AI SDK (sdk-edge-ai). Off by
-	  default; apply the `gesture_access` snippet to enable it.
+	  on-device inference from the nRF Edge AI SDK (sdk-edge-ai).
 
 if DOOR_LOCK_GESTURE_ACCESS
+
+config NRF_AXON_INTERLAYER_BUFFER_SIZE
+	int
+	default 120000
+
+config DOOR_LOCK_GESTURE_ACCESS_DETECTION_THRESHOLD_MILLI
+	int "Detection confidence threshold in permille (0-1000)"
+	range 0 1000
+	default 950
+	help
+	  Minimum model confidence required for a grid cell to count as a
+	  detection, expressed as permille (950 = 95.0%). Tuned for the
+	  bundled FOMO model; changing it without re-evaluating the model
+	  may affect false-positive rate.
 
 module = DOOR_LOCK_GESTURE_ACCESS
 module-str = Door Lock gesture access
@@ -26,7 +40,7 @@ config DOOR_LOCK_GESTURE_ACCESS_FRAME_FORWARDING
 	select UART_INTERRUPT_DRIVEN
 	select UART_LINE_CTRL
 	help
-	  Build-time debug aid, off by default. When enabled, every captured
+	  Build-time debug aid. When enabled, every captured
 	  frame plus its inference result is pushed over the SoC's native
 	  USB port (as a CDC ACM virtual COM port) to a host tool for
 	  visualization. See scripts/gesture_frame_viewer.py.
@@ -76,7 +90,7 @@ config DOOR_LOCK_GESTURE_ACCESS_THREAD_PRIORITY
 	help
 	  Priority of the dedicated gesture-access capture thread. Left as a
 	  preemptible priority so it does not delay higher-priority
-	  Matter/BLE stack threads while it blocks on frame capture and runs
+	  threads while it blocks on frame capture and runs
 	  inference.
 
 config DOOR_LOCK_GESTURE_ACCESS_DEBOUNCE_CONFIRM_FRAMES
@@ -95,7 +109,5 @@ config DOOR_LOCK_GESTURE_ACCESS_DEBOUNCE_RELEASE_FRAMES
 	help
 	  Number of consecutive frames with no model detection required
 	  before the debounced detection state falls back to "not detected".
-
-rsource "model/Kconfig"
 
 endif # DOOR_LOCK_GESTURE_ACCESS

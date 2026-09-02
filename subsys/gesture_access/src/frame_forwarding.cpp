@@ -19,10 +19,10 @@
 #include <zephyr/usb/usb_ch9.h>
 #include <zephyr/usb/usbd.h>
 
-LOG_MODULE_DECLARE(door_lock_gesture_access);
+LOG_MODULE_DECLARE(door_lock_gesture_access, CONFIG_DOOR_LOCK_GESTURE_ACCESS_LOG_LEVEL);
 
-BUILD_ASSERT(!IS_ENABLED(CONFIG_USBD_CDC_ACM_WORKQUEUE),
-	     "Frame forwarding's TX handler requires CDC ACM on the system work queue");
+static_assert(!IS_ENABLED(CONFIG_USBD_CDC_ACM_WORKQUEUE),
+	      "Frame forwarding's TX handler requires CDC ACM on the system work queue");
 
 namespace DoorLock::GestureAccess::FrameForwarding {
 
@@ -35,7 +35,7 @@ constexpr size_t kHeaderSize = 16;
 constexpr size_t kCrcSize = 2;
 constexpr uint16_t kCrcSeed = 0xffff;
 
-constexpr size_t kStageSize = 512;
+constexpr size_t kChunkSize = 512;
 
 enum class TxStage {
 	kHeader,
@@ -60,7 +60,7 @@ struct {
 	uint16_t height;
 	uint16_t crc;
 	TxStage stage;
-	uint8_t buf[kStageSize];
+	uint8_t buf[kChunkSize];
 	size_t bufLen;
 	size_t bufOff;
 } sTx;
@@ -84,7 +84,8 @@ USBD_CONFIGURATION_DEFINE(sFrameHsConfig, 0, 125, &sFrameHsCfgDesc);
 
 void BuildHeader()
 {
-	const uint32_t dataLen = (uint32_t)sTx.pixelLen;
+	const uint16_t metaLen = (uint16_t)sTx.metaLen;
+	const uint32_t pixelLen = (uint32_t)sTx.pixelLen;
 
 	sTx.buf[0] = 'G';
 	sTx.buf[1] = 'A';
@@ -94,8 +95,8 @@ void BuildHeader()
 	sTx.buf[5] = kPixFmtGrey8;
 	sys_put_le16(sTx.width, &sTx.buf[6]);
 	sys_put_le16(sTx.height, &sTx.buf[8]);
-	sys_put_le16((uint16_t)sTx.metaLen, &sTx.buf[10]);
-	sys_put_le32(dataLen, &sTx.buf[12]);
+	sys_put_le16(metaLen, &sTx.buf[10]);
+	sys_put_le32(pixelLen, &sTx.buf[12]);
 
 	sTx.bufLen = kHeaderSize;
 	sTx.bufOff = 0;
@@ -103,7 +104,7 @@ void BuildHeader()
 
 void StageMeta()
 {
-	const size_t chunk = MIN(sTx.metaLen - sTx.metaOff, kStageSize);
+	const size_t chunk = MIN(sTx.metaLen - sTx.metaOff, kChunkSize);
 
 	memcpy(sTx.buf, &sTx.meta[sTx.metaOff], chunk);
 	sTx.metaOff += chunk;
@@ -114,7 +115,7 @@ void StageMeta()
 
 void StagePixels()
 {
-	const size_t chunk = MIN(sTx.pixelLen - sTx.pixelOff, kStageSize);
+	const size_t chunk = MIN(sTx.pixelLen - sTx.pixelOff, kChunkSize);
 
 	memcpy(sTx.buf, &sTx.pixels[sTx.pixelOff], chunk);
 	sTx.pixelOff += chunk;

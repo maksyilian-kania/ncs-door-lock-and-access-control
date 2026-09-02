@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
 
-#ifndef DOOR_LOCK_GESTURE_ACCESS_MODEL_H_
-#define DOOR_LOCK_GESTURE_ACCESS_MODEL_H_
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -51,5 +50,3 @@ int Init();
 int Run(const uint8_t *frame, size_t frameSize, Result &result);
 
 } // namespace DoorLock::GestureAccess::Model
-
-#endif // DOOR_LOCK_GESTURE_ACCESS_MODEL_H_

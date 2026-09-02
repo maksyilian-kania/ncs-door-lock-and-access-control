@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
 
-#include <gesture_access_model/gesture_access_model.h>
+#include "gesture_access_model.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
@@ -28,7 +28,6 @@ constexpr size_t kOutputHeight = 12;
 constexpr size_t kOutputChannels = 2;
 constexpr size_t kOutputSize = kOutputWidth * kOutputHeight * kOutputChannels;
 constexpr size_t kCellSize = kInputWidth / kOutputWidth;
-constexpr uint16_t kDetectionThresholdMilli = 950;
 constexpr size_t kHandChannel = 1;
 
 static_assert(kOutputSize == NRF_AXON_MODEL_FOMO_PACKED_OUTPUT_SIZE);
@@ -66,7 +65,7 @@ uint8_t OutputActivation(const int8_t *output, size_t row, size_t column)
 
 bool IsDetection(uint8_t activation)
 {
-	return activation * 1000U >= kDetectionThresholdMilli * 256U;
+	return activation * 1000U >= CONFIG_DOOR_LOCK_GESTURE_ACCESS_DETECTION_THRESHOLD_MILLI * 256U;
 }
 
 
