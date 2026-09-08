@@ -151,7 +151,8 @@ CHIP_ERROR DoorLockDelegate::GetAliroGroupResolvingKey(chip::MutableByteSpan &gr
 
 	if (!DoorLock::ReaderStorage::IsGroupResolvingKeySet()) {
 		groupResolvingKey.reduce_size(0);
-		return CHIP_ERROR_NOT_FOUND;
+		// We have to return CHIP_NO_ERROR here.
+		return CHIP_NO_ERROR;
 	}
 
 	Aliro::CryptoTypes::GroupResolvingKey key{};
