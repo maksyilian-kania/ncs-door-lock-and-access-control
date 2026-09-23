@@ -7,6 +7,7 @@
 #include "platform/nfc/nfc_transport.h"
 #include "platform/nfc/apdu_fragment_assembler.h"
 #include "platform/nfc/nfc_worker.h"
+#include "platform/power/power.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -123,11 +124,23 @@ void NfcCallback(void *context, nfc_t4t_event_t event, const uint8_t *data, size
 	case NFC_T4T_EVENT_FIELD_ON:
 		ResetAssembly();
 		PostFieldOn();
+		/*
+		 * System OFF's auto-sleep idle timer (docs/system_off_proposal.md)
+		 * is driven by the same raw field events as session
+		 * activation, not by the worker thread's "session active"
+		 * belief, since the two are otherwise independent concerns.
+		 */
+		if (IS_ENABLED(CONFIG_ALIRO_UD_SYSTEM_OFF)) {
+			AliroUd::Power::NotifyFieldOn();
+		}
 		break;
 
 	case NFC_T4T_EVENT_FIELD_OFF:
 		ResetAssembly();
 		PostFieldOff();
+		if (IS_ENABLED(CONFIG_ALIRO_UD_SYSTEM_OFF)) {
+			AliroUd::Power::NotifyFieldOff();
+		}
 		break;
 
 	case NFC_T4T_EVENT_DATA_IND:
@@ -159,6 +172,14 @@ int Start()
 
 	LOG_INF("NFC T4T listen mode started (raw ISO-DEP)");
 	return 0;
+}
+
+void StopEmulation()
+{
+	const int err = nfc_t4t_emulation_stop();
+	if (err != 0) {
+		LOG_ERR("nfc_t4t_emulation_stop failed: %d", err);
+	}
 }
 
 } // namespace AliroUd::Nfc

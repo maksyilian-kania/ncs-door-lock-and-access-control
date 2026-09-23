@@ -172,3 +172,35 @@ behavior changed, so no row below changed status.
 | ALIRO-UD-SYRS-P1-040 | Meet every NFC/processing-time bound applicable to selected PICS in ALIRO-TP on target DK. | `src/platform/nfc/command_timing.h`/`.cpp` (`CommandTiming`, `BeginCommandTiming()`/`EndCommandTiming()`/`GetCommandTimingSnapshot()`/`ResetCommandTimingStats()`), `src/platform/nfc/nfc_worker.cpp` (wraps `HandleCommandApdu()`), `src/cli/cli.cpp` (`aliro-ud timing stats`/`reset`), `src/platform/nfc/nfc_transport.cpp` (`GetTimingConstraints()`, still `TimingConstraints{}`) | No normative numeric NFC processing-time bound applicable to this application's PICS was found in the corpus searched (AWP7); protocol-level ISO-DEP FWT is negotiated entirely inside `nfc_t4t_lib`, never surfaced to this application, with no application-facing WTX-request API | `aliro_nfc_user_device.functional.command_timing`/`command_timing_disabled` (16 host cases: `CommandTiming` logic + real worker/stack integration + disabled-build no-op) | DK build resource report (FLASH/RAM, AWP7); CLI `timing stats`/`reset` confirmed live on real hardware (no NFC reader available to collect an on-target sample) | ALIRO-SPEC Appendix 15; ALIRO-TP | not-yet-verifiable |
 
 \* "zero or more EXCHANGE commands" per the SyRS wording.
+
+## Appendix: System OFF (post-AWP8 feature, not an AWP)
+
+`src/platform/power/` (`docs/system_off_proposal.md`) adds NFC-field and
+Button 1 wake, plus Button-1/auto-idle sleep via `sys_poweroff()`. This is
+an application-level power-management feature, not a numbered Application
+Work Package, and has no `ALIRO-UD-SYRS-P1-*` row of its own: no Phase 1
+requirement calls for System OFF, and none of the rows above change status
+as a result of it.
+
+- `power_policy.{h,cpp}`: pure decision logic (idle-deadline arbiter against
+  `AliroUd::Authorization::Window` validity, manual-sleep request, and a
+  depth-counted mutation guard), host-tested by the `power` suite (15
+  cases, host, no hardware dependency) mirroring the `authorization` suite's
+  `test_authorization_window.cpp` "fake monotonic clock" approach.
+- `power.cpp`/`power_button1.cpp`/`power_indicator.cpp`: DK-hardware-only
+  orchestration (`sw1`/`led1` GPIO, console suspend, the single
+  `sys_poweroff()` call site) - not host-tested, same split as
+  `authorization_button.cpp`/`authorization_led.cpp`.
+- `AliroUd::Lifecycle::RunMutation()` now brackets every mutating CLI
+  operation with `AliroUd::Power::BeginMutationGuard()`/`EndMutationGuard()`
+  so a power-off trigger arriving mid-mutation is deferred, not dropped,
+  and fires the instant the mutation ends - relevant to, but not a
+  replacement for, `ALIRO-UD-SYRS-P1-007`'s existing power-loss
+  persistence row above, whose noted host-fault-injection gap this feature
+  makes more consequential to close (see `docs/system_off_proposal.md`
+  caveat #3).
+- Status: implemented and host-tested; not yet exercised on the DK (NFC/
+  Button-1 wake and sleep, auto-idle timing, window-suppression, and the
+  mid-`commit` fault-injection pass are all still pending, per
+  `docs/system_off_proposal.md`'s "Reminder"). Not committed pending
+  review.

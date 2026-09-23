@@ -49,11 +49,11 @@ void HandleButtonPressWork(k_work *)
 	AliroUd::Authorization::GlobalWindow().Open(
 		k_uptime_get(), static_cast<uint32_t>(CONFIG_ALIRO_UD_AUTHORIZATION_WINDOW_SECONDS) * 1000U);
 	AliroUd::Authorization::Indicator::SetActive(false);
-	LOG_INF("Button pressed: authorization window opened for %d s", CONFIG_ALIRO_UD_AUTHORIZATION_WINDOW_SECONDS);
 }
 
-void OnButtonPressed(const device *, gpio_callback *, uint32_t)
+void OnButtonPressed(const device *, gpio_callback *, uint32_t pins)
 {
+	ARG_UNUSED(pins);
 	k_work_submit(&sButtonWork);
 }
 

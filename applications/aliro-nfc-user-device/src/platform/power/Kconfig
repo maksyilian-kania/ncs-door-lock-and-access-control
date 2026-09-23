@@ -1,0 +1,57 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+menu "System OFF"
+
+config ALIRO_UD_SYSTEM_OFF
+	bool "System OFF support"
+	default y
+	help
+	  Enables Button 0 (sw0) "wake + authorize" as the sole System OFF wake
+	  source (the NFC frontend is deactivated before power-off so an NFC
+	  field cannot wake the DK), Button 1 (sw1) awake-only hold/off toggle,
+	  and auto-idle sleep with sys_poweroff() (docs/system_off_proposal.md).
+	  Disabling this alone
+	  removes all runtime power-off behavior with no other code changes:
+	  this module's own sources are not compiled in when this is disabled
+	  (see CMakeLists.txt), and every call site into this module elsewhere
+	  in the application is wrapped in IS_ENABLED(CONFIG_ALIRO_UD_SYSTEM_OFF).
+
+if ALIRO_UD_SYSTEM_OFF
+
+config ALIRO_UD_SYSTEM_OFF_IDLE_DELAY_S
+	int "Auto-sleep idle delay after NFC field-off (seconds)"
+	default 5
+	help
+	  Delay after the NFC field is lost before an idle-timeout
+	  sys_poweroff() is attempted (mirrors samples/nfc/system_off's
+	  reschedule/cancel-on-FIELD_ON/FIELD_OFF pattern, but longer than
+	  that sample's 3 s). Cancelled by a subsequent field-on. The
+	  resulting deadline is never allowed to fire while a valid button
+	  authorization window (AliroUd::Authorization::Window) is open.
+
+config ALIRO_UD_SYSTEM_OFF_BUTTON1_SETTLE_MS
+	int "Button 1 toggle settle / wake-to-press separation (milliseconds)"
+	default 300
+	help
+	  Minimum time separation, after this boot's wake, before a Button 1
+	  press is accepted as a hold-awake/off toggle. Serves two purposes:
+	  it delays arming Button 1's edge interrupt after boot, and it is
+	  re-checked in HandleButton1Press(). This prevents the Button 0 press
+	  that woke the DK from cross-triggering the Button 1 handler on this
+	  chip family (LATCH/wake-attribution ambiguity,
+	  docs/system_off_proposal.md caveat #1/#2) and pinning the DK awake.
+	  Comfortably above typical mechanical button bounce.
+
+endif # ALIRO_UD_SYSTEM_OFF
+
+module = ALIRO_UD_POWER
+module-str = ALIRO_UD_POWER
+module-dep = LOG
+module-help = Enables Aliro NFC User Device System OFF/power log messages.
+source "$(ZEPHYR_BASE)/subsys/logging/Kconfig.template.log_config"
+
+endmenu # System OFF

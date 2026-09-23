@@ -3,10 +3,13 @@
 Phase 1 Aliro **User Device** application for the nRF54LM20B DK, built on
 the DK's integrated NFC-A antenna/NFCT peripheral and the checked-out
 `Aliro::UserDeviceStack` facade (west project `ncs-aliro`). This replaces
-the earlier System-OFF/wake-on-field proof of concept: the device now
-remains powered while idle, implements the NFC-A Type 4 Tag/ISO-DEP listen
-transport, and provides local credential/trust/mailbox provisioning and
-button-based authorization through a development CLI.
+the earlier System-OFF/wake-on-field proof of concept: Phase 1 (AWP0-AWP8)
+implements the NFC-A Type 4 Tag/ISO-DEP listen transport and local
+credential/trust/mailbox provisioning and button-based authorization
+through a development CLI; a standalone System OFF feature
+(`src/platform/power/`, not an AWP) was added on top afterward,
+reintroducing NFC-field/Button-1 wake and Button-1/auto-idle sleep - see
+`docs/system_off_proposal.md`.
 
 See [`docs/architecture.md`](docs/architecture.md) for module boundaries and
 the application/stack split, [`docs/traceability.md`](docs/traceability.md)
@@ -44,6 +47,9 @@ struction (`src/platform/crypto`).
   (`src/cli`).
 - A lifecycle coordinator that serializes mutating CLI operations against
   any in-progress NFC session (`src/lifecycle`).
+- System OFF: NFC-field and Button 1 wake, Button-1/auto-idle sleep via
+  `sys_poweroff()` (`src/platform/power`; standalone feature, not an AWP -
+  see `docs/system_off_proposal.md`).
 
 Not implemented by this application — owned by the checked-out
 `Aliro::UserDeviceStack` facade, per `APP_PLAN.md`'s boundary rules:
@@ -55,9 +61,9 @@ Not implemented by this application — owned by the checked-out
   sequencing (the application supplies only thin PSA primitives).
 
 Explicitly excluded from Phase 1 (see `APP_PLAN.md` §5): BLE/UWB transports,
-Reader/poll-mode behavior, System OFF and automatic power-down, extended-length
-APDUs, User Device Descriptor/Reader-notification/`update_doc`, and all
-`ALIRO-UD-SYRS-P2-*` requirements.
+Reader/poll-mode behavior, extended-length APDUs, User Device Descriptor/
+Reader-notification/`update_doc`, and all `ALIRO-UD-SYRS-P2-*` requirements.
+System OFF is no longer excluded (see the Scope list above).
 
 ## Requirements
 
@@ -163,7 +169,7 @@ applications/aliro-nfc-user-device/
 └── src/
     ├── main.cpp                     # boot sequencing only
     ├── lifecycle/                   # mutating-operation coordinator
-    ├── platform/{nfc,os,crypto,authorization}/
+    ├── platform/{nfc,os,crypto,authorization,power}/
     ├── storage/{credential,mailbox}/
     └── cli/                         # aliro-ud shell command tree
 ```
@@ -171,7 +177,7 @@ applications/aliro-nfc-user-device/
 Host tests for every module live under
 `tests/functional/subsys/aliro_nfc_user_device/` at the repository root
 (`apdu_fragment_assembler`, `authorization`, `cli_info`, `command_timing`,
-`crypto`, `host_smoke`, `mailbox`, `worker_lifecycle`).
+`crypto`, `host_smoke`, `mailbox`, `power`, `worker_lifecycle`).
 
 ## References
 

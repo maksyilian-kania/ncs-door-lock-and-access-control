@@ -11,6 +11,7 @@
 
 #include "platform/nfc/nfc_transport.h"
 #include "platform/os/app_status.h"
+#include "platform/power/power.h"
 #include "storage/credential/credential_store.h"
 #include "storage/key/persistent_key_store.h"
 #include "storage/mailbox/mailbox_store.h"
@@ -91,6 +92,17 @@ int main(void)
 	}
 
 	AliroUd::AppStatus::SetInitState(AliroUd::AppStatus::InitState::Running);
+
+	/*
+	 * System OFF support (docs/system_off_proposal.md): Button 0
+	 * "wake + authorize" as the sole wake source, Button 1 hold/off toggle,
+	 * auto-idle sleep. Started last, after the NFC transport and worker
+	 * thread are already running, since NotifyFieldOn()/NotifyFieldOff()
+	 * calls can arrive as soon as AliroUd::Nfc::Start() returns above.
+	 */
+	if (IS_ENABLED(CONFIG_ALIRO_UD_SYSTEM_OFF)) {
+		AliroUd::Power::Start();
+	}
 
 	return 0;
 }

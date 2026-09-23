@@ -3,9 +3,11 @@
 This document describes the implemented Phase 1 application: its module
 boundaries, how it relates to the checked-out `Aliro::UserDeviceStack`
 facade, and how the nRF54LM20B DK NFC hardware is used. It supersedes the
-earlier proof-of-concept architecture document (System OFF/wake-on-field);
-that behavior was removed in AWP0 and Phase 1 explicitly excludes it (see
-`APP_PLAN.md` §5).
+earlier proof-of-concept architecture document; that behavior was removed
+in AWP0. System OFF was reintroduced afterward as a standalone feature
+(`src/platform/power/`, `docs/system_off_proposal.md`) - not as a numbered
+Application Work Package - with the application otherwise remaining
+powered while idle as AWP0 through AWP8 built it.
 
 ## Aliro roles: Reader vs User Device
 
@@ -59,6 +61,7 @@ flowchart TB
     os["platform/os\n(mutex, timer, queue,\nno-trusted-time stub)"]
     crypto["platform/crypto\n(PSA bindings, cert validation)"]
     auth["platform/authorization\n(button window, LED)"]
+    power["platform/power\n(System OFF: idle arbiter,\nButton 1, led1)"]
     credential["storage/credential\n(settings/NVS + PSA/CRACEN/KMU,\njournal, trust bindings)"]
     mailbox["storage/mailbox\n(session engine + Store)"]
     cli["cli\n(aliro-ud shell tree)"]
@@ -68,8 +71,11 @@ flowchart TB
     main --> nfc
     main --> os
     main --> cli
+    main --> power
     nfc --> lifecycle
+    nfc --> power
     lifecycle --> stack
+    lifecycle --> power
     cli --> lifecycle
     os --> stack
     stack --> crypto
@@ -79,13 +85,18 @@ flowchart TB
     cli --> credential
     cli --> mailbox
     cli --> auth
+    power --> auth
 ```
 
-`main.cpp` performs boot sequencing only — no protocol logic, no System OFF
-scheduling. `platform/*` and `storage/*` implement the application side of
-the checked-out public `Aliro::Interface::UserDevice::*` contract;
-`Aliro::UserDeviceStack` is the single facade every stack-owned behavior is
-routed through.
+`main.cpp` performs boot sequencing only — no protocol logic. `platform/*`
+and `storage/*` implement the application side of the checked-out public
+`Aliro::Interface::UserDevice::*` contract; `Aliro::UserDeviceStack` is the
+single facade every stack-owned behavior is routed through. `platform/power`
+is the one exception to "no protocol logic in `platform/*`, only
+`Aliro::UserDeviceStack`-facing adapters": it is pure application-level
+power management, outside the Aliro protocol entirely, and is the only
+module besides `main.cpp` with a boot-time `Start()` entry point rather
+than a stack-facing interface implementation.
 
 ### NFC transport and the dedicated worker thread (`platform/nfc`)
 
@@ -148,6 +159,38 @@ transaction blocks waiting for a button press: `GetState()` returns
 synchronously so the stack fails the transaction promptly, and
 `authorization_led.cpp` lights an LED whenever authorization is required
 and no valid window exists.
+
+### System OFF (`platform/power`)
+
+A standalone power-management feature (`docs/system_off_proposal.md`), not
+a numbered Application Work Package and not part of the Aliro protocol
+surface. Wakes on NFC field detection (existing mechanism, unaffected) or a
+Button 1 (`sw1`) press; sleeps on an explicit Button 1 press while awake,
+or automatically after `CONFIG_ALIRO_UD_SYSTEM_OFF_IDLE_DELAY_S` (default
+5 s) of no NFC field, unless a valid `AliroUd::Authorization::Window` is
+open (Button 0's 30 s window must never be interrupted by an *automatic*
+power-off; a deliberate Button 1 press still can be - operator is trusted
+to know what they are doing).
+
+`power_policy.{h,cpp}` is the pure, host-testable decision arbiter -
+idle-deadline vs. window validity, manual-sleep request, and a
+depth-counted mutation guard - with no Zephyr timer/GPIO/`sys_poweroff()`
+dependency, mirroring `authorization_window.cpp`'s design. `power.cpp`
+owns the one `sys_poweroff()` call site (suspending the console first, so
+no shell/log output is truncated) plus the `k_work_delayable` idle timer;
+`power_button1.cpp`/`power_indicator.cpp` are the DK-hardware-only `sw1`/
+`led1` GPIO backends (`led0`'s existing "authorization required"
+indication is untouched).
+
+`AliroUd::Lifecycle::RunMutation()` brackets every mutating CLI operation
+with the mutation guard: a power-off trigger that becomes due while a
+`credential commit`/`delete`/`reset` or `mailbox init`/`reset` is in
+flight is deferred, never dropped, and fires the instant the mutation
+ends. The whole feature is Kconfig-gated
+(`CONFIG_ALIRO_UD_SYSTEM_OFF`, default `y`): disabling it removes all
+runtime power-off behavior with no other code changes, since this
+module's sources are not even compiled in and every call site into it
+elsewhere is wrapped in `IS_ENABLED(...)`.
 
 ### Credential and trust persistence (`storage/credential`)
 
@@ -226,6 +269,9 @@ Key Kconfig options across the module tree:
 | `CONFIG_ALIRO_UD_MAILBOX_MAX_SESSIONS` | Concurrent open mailbox sessions (default 2, range 1–8) |
 | `CONFIG_ALIRO_UD_MAILBOX_MAX_DATA_SUBSET_PAIRS` | Provisionable AUTH1 `mailbox_data_subset` pairs (default 4, range 0–32) |
 | `CONFIG_ALIRO_UD_TIMING_INSTRUMENTATION` | Command-to-response timing instrumentation (default `y`, fully removable) |
+| `CONFIG_ALIRO_UD_SYSTEM_OFF` | System OFF support: NFC-field/Button-1 wake, Button-1/auto-idle sleep (default `y`, fully removable) |
+| `CONFIG_ALIRO_UD_SYSTEM_OFF_IDLE_DELAY_S` | Auto-sleep idle delay after NFC field-off, seconds (default 5) |
+| `CONFIG_ALIRO_UD_SYSTEM_OFF_BUTTON1_SETTLE_MS` | Button 1 sleep-interrupt arming settle delay after boot, milliseconds (default 300) |
 | `CONFIG_MAIN_STACK_SIZE` / `CONFIG_SHELL_STACK_SIZE` | Raised from Zephyr defaults after two on-target stack-overflow faults found in AWP4/AWP6; see `prj.conf` comments and `evidence/AWP4.md`/`AWP6.md` |
 
 Board-specific overlay/conf files live under `boards/`.
@@ -251,7 +297,8 @@ applications/aliro-nfc-user-device/
     │   ├── nfc/        (nfc_transport, nfc_worker, apdu_fragment_assembler, command_timing)
     │   ├── os/         (os_mutex, os_timer, os_queue, os_trusted_time, os_logging, app_status, transaction)
     │   ├── crypto/      (crypto, certificate, credential_signing)
-    │   └── authorization/ (authorization, authorization_window, authorization_button, authorization_led)
+    │   ├── authorization/ (authorization, authorization_window, authorization_button, authorization_led)
+    │   └── power/       (power, power_policy, power_button1, power_indicator)
     ├── storage/
     │   ├── credential/ (credential_store, credential_persistence_settings, key_backend_psa, credential_types, provisioning)
     │   └── mailbox/    (mailbox, mailbox_sessions, mailbox_store, mailbox_persistence_settings, mailbox_types)
@@ -261,7 +308,7 @@ applications/aliro-nfc-user-device/
 Host tests mirror this layout under
 `tests/functional/subsys/aliro_nfc_user_device/{apdu_fragment_assembler,
 authorization, cli_info, command_timing, crypto, host_smoke, mailbox,
-worker_lifecycle}/`.
+power, worker_lifecycle}/`.
 
 ## References
 

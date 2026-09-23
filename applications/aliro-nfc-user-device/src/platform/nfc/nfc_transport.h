@@ -18,4 +18,15 @@ namespace AliroUd::Nfc {
  */
 int Start();
 
+/**
+ * @brief Deactivates the NFC frontend (`nfc_t4t_emulation_stop()`).
+ *
+ * Called immediately before `sys_poweroff()` (System OFF) so an NFC field
+ * can no longer wake the DK: Button 0 is the sole wake source. A live NFC
+ * session is RAM-only and reinitializes cleanly on the next boot, so
+ * stopping mid-transaction is equivalent to the field being pulled away.
+ * No-op-safe to call even if emulation was never started.
+ */
+void StopEmulation();
+
 } // namespace AliroUd::Nfc

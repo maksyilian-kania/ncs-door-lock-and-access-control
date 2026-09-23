@@ -9,6 +9,7 @@
 #include <aliro/errors.h>
 
 #include "platform/nfc/nfc_worker.h"
+#include "platform/power/power.h"
 
 /**
  * @brief Serializes every mutating credential operation against NFC session
@@ -37,11 +38,27 @@ namespace AliroUd::Lifecycle {
  * `AliroUd::Credential::Store` mutation.
  *
  * @return Whatever `fn()` returns.
+ *
+ * Also brackets `fn()` with a System OFF mutation guard
+ * (docs/system_off_proposal.md): a Button-1 press or auto idle-timeout
+ * that becomes due while `fn()` is running never interrupts it and is
+ * never dropped - `AliroUd::Power::EndMutationGuard()` fires any such
+ * deferred power-off immediately once `fn()` returns.
  */
 template <typename Fn> AliroError RunMutation(Fn &&fn)
 {
 	AliroUd::Nfc::EnterMaintenancePause();
+
+	if (IS_ENABLED(CONFIG_ALIRO_UD_SYSTEM_OFF)) {
+		AliroUd::Power::BeginMutationGuard();
+	}
+
 	const AliroError result = fn();
+
+	if (IS_ENABLED(CONFIG_ALIRO_UD_SYSTEM_OFF)) {
+		AliroUd::Power::EndMutationGuard();
+	}
+
 	AliroUd::Nfc::ExitMaintenancePause();
 	return result;
 }
