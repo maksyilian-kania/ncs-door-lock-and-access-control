@@ -4,8 +4,9 @@ This directory indexes the remaining application work for the
 project-selected Aliro 1.0 NFC User Device profile.
 
 `C` means **Compliance**. `C2` is compliance epic 2; `C2.1` is one
-independently executable slice. Implementation requests must identify one
-slice as `TARGET_SLICE=Cx.y`.
+independently executable slice. Direct implementation requests identify one
+slice as `TARGET_SLICE=Cx.y`; orchestration uses an explicit ordered
+`SCOPE=Cx.y,...`.
 
 ## Authority and scope
 
@@ -26,13 +27,18 @@ selection, notifications, and `update_doc` are not selected.
   uncommitted.
 - `/ud-verify TARGET_SLICE=Cx.y` independently verifies one slice and commits
   it only when every required gate passes.
+- `/ud-orchestrate SCOPE=Cx.y,... IMPLEMENTATION_LLM=<model>
+  VERIFICATION_LLM=<model>` runs the listed slices sequentially with a fresh
+  implementer and verifier for each.
 
-Both skills require explicit invocation.
+All skills require explicit invocation. `SCOPE` must list exact slice IDs;
+counts, ranges, epic names, and implicit “next” scopes are rejected.
 
 The scripts under `scripts/` enforce harness structure:
 
-- `validate-slice.py` runs at the start of both skills to validate the target,
-  slice catalog, and prerequisite references.
+- `validate-slice.py` runs before implementation and verification, including
+  once per orchestrated slice, to validate the target, catalog, and
+  prerequisite references.
 - `validate-state.py` runs before either skill finishes to ensure local STATE
   is short, ignored, unstaged, and structurally valid.
 - `validate-traceability.py` runs during verification: deferred mode before

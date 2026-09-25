@@ -10,8 +10,11 @@ Apply this rule when implementing or changing application behavior under
 review, and harness/documentation-only maintenance do not require a target
 unless they implement slice deliverables.
 
-- An implementation request must explicitly provide
+- A direct implementation request must explicitly provide
   `TARGET_SLICE=Cx.y`.
+- `/ud-orchestrate` may instead provide an explicit ordered
+  `SCOPE=Cx.y,...`; each child invocation must still receive exactly one
+  `TARGET_SLICE`.
 - If the target is missing, unknown, ambiguous, complete, or has an
   incomplete prerequisite, ask the user; never choose a slice.
 - Execute exactly one slice from
