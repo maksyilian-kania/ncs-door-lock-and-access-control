@@ -27,6 +27,17 @@ using namespace Aliro::UserDevice;
  * so a Replace() can always durably own its new key at a *different* ID
  * than the one currently committed for that slot, making it safe to destroy
  * the old key only after the new one is committed.
+ *
+ * Durable model: slot i's persisted record (one atomically written settings
+ * entry) is authoritative, and the only PSA object slot i may own is the
+ * key at that record's mPersistedKeyId. The record write is the single
+ * commit point of Replace() and the record erase that of every deletion;
+ * every interruption therefore leaves either the old or the new record,
+ * plus at most unreferenced keys at the slot's two IDs. SweepSlotLocked()
+ * destroys those, both at boot and before a Replace() reuses the slot, so
+ * a cleanup failure is always retained as recoverable state. Init() also
+ * drops records that cannot be authoritative (malformed, duplicate, a key
+ * ID outside the slot's pair, or a missing key).
  */
 namespace AliroUd::PersistentKey::Store {
 namespace {
@@ -122,6 +133,79 @@ AliroError PersistLocked(size_t slotIndex, const Record &record)
 	return Persistence::SaveRecord(slotIndex, record);
 }
 
+void KeepFirstError(AliroError &firstError, AliroError error)
+{
+	if (error != ALIRO_NO_ERROR && firstError == ALIRO_NO_ERROR) {
+		firstError = error;
+	}
+}
+
+/*
+ * Destroys every key present at the slot's two IDs other than `keepKeyId`.
+ * Only keys known to be present are destroyed, so repeated sweeps never
+ * destroy the same object twice. Visits both IDs and returns the first error.
+ */
+AliroError SweepSlotLocked(size_t slotIndex, CryptoTypes::KeyId keepKeyId)
+{
+	AliroError firstError{ ALIRO_NO_ERROR };
+
+	for (const CryptoTypes::KeyId keyId : { CommittedKeyId(slotIndex), StagedKeyId(slotIndex) }) {
+		if (keyId == keepKeyId) {
+			continue;
+		}
+
+		bool present{ false };
+		AliroError error = Backend::Exists(keyId, present);
+		if (error == ALIRO_NO_ERROR && present) {
+			error = Backend::Destroy(keyId);
+		}
+		KeepFirstError(firstError, error);
+	}
+
+	return firstError;
+}
+
+/*
+ * Erases the slot's record (the commit point), then destroys every key the
+ * slot owns. An erase failure leaves the record and its key untouched.
+ */
+AliroError RemoveSlotLocked(size_t slotIndex)
+{
+	if (sRecords[slotIndex].mValid) {
+		const AliroError eraseError = Persistence::EraseRecord(slotIndex);
+		if (eraseError != ALIRO_NO_ERROR) {
+			return eraseError;
+		}
+		sRecords[slotIndex] = Record{};
+	}
+
+	return SweepSlotLocked(slotIndex, 0);
+}
+
+/*
+ * Decides whether a loaded record may become authoritative. Records loaded
+ * from lower slots are already in sRecords, so the first of two duplicates
+ * wins. A key whose presence cannot be determined keeps the record and
+ * reports the error.
+ */
+AliroError AcceptLoadedLocked(size_t slotIndex, const Record &loaded, bool &outAccept)
+{
+	outAccept = loaded.mValid && loaded.mHandle != kInvalidPersistentKeyHandle &&
+		    loaded.mCredentialHandle != kInvalidCredentialHandle &&
+		    (loaded.mPersistedKeyId == CommittedKeyId(slotIndex) ||
+		     loaded.mPersistedKeyId == StagedKeyId(slotIndex)) &&
+		    FindLocked(loaded.mHandle) == nullptr &&
+		    FindLocked(loaded.mCredentialHandle, loaded.mReaderGroupSubIdentifier) == nullptr;
+	if (!outAccept) {
+		return ALIRO_NO_ERROR;
+	}
+
+	bool keyPresent{ false };
+	const AliroError error = Backend::Exists(loaded.mPersistedKeyId, keyPresent);
+	outAccept = keyPresent || error != ALIRO_NO_ERROR;
+	return error;
+}
+
 } // namespace
 
 AliroError Init()
@@ -131,8 +215,12 @@ AliroError Init()
 		return error;
 	}
 
+	Lock lock;
+
 	sRecords = {};
 	sNextHandle = 1;
+
+	AliroError firstError{ ALIRO_NO_ERROR };
 
 	for (size_t i = 0; i < kMaxRecords; ++i) {
 		Record loaded{};
@@ -142,15 +230,29 @@ AliroError Init()
 			return error;
 		}
 
-		if (present) {
-			sRecords[i] = loaded;
-			if (loaded.mHandle >= sNextHandle) {
-				sNextHandle = loaded.mHandle + 1;
-			}
+		if (!present) {
+			continue;
+		}
+
+		bool accept{ false };
+		KeepFirstError(firstError, AcceptLoadedLocked(i, loaded, accept));
+		if (!accept) {
+			LOG_WRN("Dropping unrecoverable persistent-key record in slot %zu", i);
+			KeepFirstError(firstError, Persistence::EraseRecord(i));
+			continue;
+		}
+
+		sRecords[i] = loaded;
+		if (loaded.mHandle >= sNextHandle) {
+			sNextHandle = loaded.mHandle + 1;
 		}
 	}
 
-	return ALIRO_NO_ERROR;
+	for (size_t i = 0; i < kMaxRecords; ++i) {
+		KeepFirstError(firstError, SweepSlotLocked(i, sRecords[i].mValid ? sRecords[i].mPersistedKeyId : 0));
+	}
+
+	return firstError;
 }
 
 AliroError Lookup(CredentialHandle handle, const ReaderGroupSubIdentifier &readerGroupSubIdentifier,
@@ -205,6 +307,12 @@ AliroError Replace(CredentialHandle handle, const ReaderGroupSubIdentifier &read
 	const CryptoTypes::KeyId desiredPersistentKeyId =
 		(oldPersistedKeyId == CommittedKeyId(slotIndex)) ? StagedKeyId(slotIndex) : CommittedKeyId(slotIndex);
 
+	/* Clear keys left by an earlier failed cleanup; the committed key, if any, is kept. */
+	const AliroError sweepError = SweepSlotLocked(slotIndex, oldPersistedKeyId);
+	if (sweepError != ALIRO_NO_ERROR) {
+		return sweepError;
+	}
+
 	/*
 	 * Durably own the new key material before touching any storage
 	 * (in-memory or persisted): on failure here, the old record (if any)
@@ -226,7 +334,8 @@ AliroError Replace(CredentialHandle handle, const ReaderGroupSubIdentifier &read
 
 	const AliroError persistError = PersistLocked(slotIndex, newRecord);
 	if (persistError != ALIRO_NO_ERROR) {
-		Backend::Destroy(actualPersistedKeyId);
+		/* A failed destroy leaves an unreferenced key, swept later. */
+		(void)Backend::Destroy(actualPersistedKeyId);
 		return persistError;
 	}
 
@@ -235,9 +344,13 @@ AliroError Replace(CredentialHandle handle, const ReaderGroupSubIdentifier &read
 		sNextHandle = newRecord.mHandle + 1;
 	}
 
-	/* Only now retire the old key: the new record is durably committed. */
+	/*
+	 * Only now retire the old key: the new record is durably committed, so
+	 * this call must report success. A failed retirement leaves an
+	 * unreferenced key, swept later.
+	 */
 	if (oldPersistedKeyId != 0 && oldPersistedKeyId != actualPersistedKeyId) {
-		Backend::Destroy(oldPersistedKeyId);
+		(void)Backend::Destroy(oldPersistedKeyId);
 	}
 
 	outRecord = newRecord.mHandle;
@@ -248,21 +361,12 @@ AliroError Delete(PersistentKeyHandle record)
 {
 	Lock lock;
 
-	Record *found = FindLocked(record);
+	const Record *found = FindLocked(record);
 	if (found == nullptr) {
 		return ALIRO_NO_ERROR;
 	}
 
-	const size_t slotIndex = SlotIndexOf(found);
-	const CryptoTypes::KeyId persistedKeyId = found->mPersistedKeyId;
-
-	*found = Record{};
-	const AliroError eraseError = Persistence::EraseRecord(slotIndex);
-	if (eraseError != ALIRO_NO_ERROR) {
-		return eraseError;
-	}
-
-	return Backend::Destroy(persistedKeyId);
+	return RemoveSlotLocked(SlotIndexOf(found));
 }
 
 AliroError Reset()
@@ -272,20 +376,7 @@ AliroError Reset()
 	AliroError firstError{ ALIRO_NO_ERROR };
 
 	for (size_t i = 0; i < kMaxRecords; ++i) {
-		if (!sRecords[i].mValid) {
-			continue;
-		}
-
-		const CryptoTypes::KeyId persistedKeyId = sRecords[i].mPersistedKeyId;
-		sRecords[i] = Record{};
-
-		AliroError error = Persistence::EraseRecord(i);
-		if (error == ALIRO_NO_ERROR) {
-			error = Backend::Destroy(persistedKeyId);
-		}
-		if (error != ALIRO_NO_ERROR && firstError == ALIRO_NO_ERROR) {
-			firstError = error;
-		}
+		KeepFirstError(firstError, RemoveSlotLocked(i));
 	}
 
 	return firstError;
@@ -298,19 +389,8 @@ AliroError DeleteAllForCredential(CredentialHandle handle)
 	AliroError firstError{ ALIRO_NO_ERROR };
 
 	for (size_t i = 0; i < kMaxRecords; ++i) {
-		if (!sRecords[i].mValid || sRecords[i].mCredentialHandle != handle) {
-			continue;
-		}
-
-		const CryptoTypes::KeyId persistedKeyId = sRecords[i].mPersistedKeyId;
-		sRecords[i] = Record{};
-
-		AliroError error = Persistence::EraseRecord(i);
-		if (error == ALIRO_NO_ERROR) {
-			error = Backend::Destroy(persistedKeyId);
-		}
-		if (error != ALIRO_NO_ERROR && firstError == ALIRO_NO_ERROR) {
-			firstError = error;
+		if (sRecords[i].mValid && sRecords[i].mCredentialHandle == handle) {
+			KeepFirstError(firstError, RemoveSlotLocked(i));
 		}
 	}
 

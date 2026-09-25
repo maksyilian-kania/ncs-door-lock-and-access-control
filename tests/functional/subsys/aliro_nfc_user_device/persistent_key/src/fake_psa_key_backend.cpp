@@ -5,6 +5,7 @@
  */
 
 #include "fake_psa_key_backend.h"
+#include "fake_power_loss.h"
 
 #include <storage/key/persistent_key_backend.h>
 #include <storage/key/persistent_key_types.h>
@@ -33,6 +34,7 @@ CryptoTypes::KeyId sNextInputKeyId{ kInputKeyIdBase + 1 };
 CryptoTypes::KeyId sNextTemporaryKeyId{ kTemporaryKeyIdBase + 1 };
 Fault sArmedFault{ Fault::None };
 size_t sDurableDestroyCount{ 0 };
+size_t sDurableCreateCount{ 0 };
 size_t sInvalidDestroyCount{ 0 };
 
 Object *Find(CryptoTypes::KeyId keyId)
@@ -82,7 +84,18 @@ void Reset()
 	sNextTemporaryKeyId = kTemporaryKeyIdBase + 1;
 	sArmedFault = Fault::None;
 	sDurableDestroyCount = 0;
+	sDurableCreateCount = 0;
 	sInvalidDestroyCount = 0;
+}
+
+void Reboot()
+{
+	for (auto &object : sObjects) {
+		if (object.mLive && object.mKind != Kind::Durable) {
+			Release(object);
+		}
+	}
+	sArmedFault = Fault::None;
 }
 
 void FailNext(Fault fault)
@@ -149,6 +162,11 @@ size_t DurableDestroyCount()
 	return sDurableDestroyCount;
 }
 
+size_t DurableCreateCount()
+{
+	return sDurableCreateCount;
+}
+
 size_t InvalidDestroyCount()
 {
 	return sInvalidDestroyCount;
@@ -174,13 +192,14 @@ AliroError DurablyOwn(CryptoTypes::KeyId sourceKeyId, CryptoTypes::KeyId desired
 		return ALIRO_KEY_ALREADY_EXISTS;
 	}
 
-	if (ConsumeFault(Fault::DurablyOwn)) {
+	if (ConsumeFault(Fault::DurablyOwn) || !FakePower::AllowDurableWrite()) {
 		return ALIRO_ERROR_INTERNAL;
 	}
 
 	if (Create(Kind::Durable, desiredPersistentKeyId, source->mMaterial) == nullptr) {
 		return ALIRO_NO_MEMORY;
 	}
+	++sDurableCreateCount;
 
 	outActualPersistentKeyId = desiredPersistentKeyId;
 	return ALIRO_NO_ERROR;
@@ -209,6 +228,18 @@ AliroError MintVolatileHandle(CryptoTypes::KeyId persistedKeyId, CryptoTypes::Ke
 	return ALIRO_NO_ERROR;
 }
 
+AliroError Exists(CryptoTypes::KeyId persistedKeyId, bool &outExists)
+{
+	outExists = false;
+	if (ConsumeFault(Fault::Exists)) {
+		return ALIRO_ERROR_INTERNAL;
+	}
+
+	const Object *object = Find(persistedKeyId);
+	outExists = object != nullptr && object->mKind == Kind::Durable;
+	return ALIRO_NO_ERROR;
+}
+
 AliroError Destroy(CryptoTypes::KeyId persistedKeyId)
 {
 	Object *durable = Find(persistedKeyId);
@@ -216,6 +247,10 @@ AliroError Destroy(CryptoTypes::KeyId persistedKeyId)
 		/* Idempotent per the backend contract, but the store under test must never rely on it. */
 		++sInvalidDestroyCount;
 		return ALIRO_NO_ERROR;
+	}
+
+	if (ConsumeFault(Fault::Destroy) || !FakePower::AllowDurableWrite()) {
+		return ALIRO_ERROR_INTERNAL;
 	}
 
 	Release(*durable);

@@ -229,6 +229,11 @@ AliroError PurgePreferredEntriesForHandle(CredentialHandle handle)
 /*
  * Deletes one slot's committed record and destroys its key, through the
  * journal (crash-safe: see the JournalOp::Delete recovery case in Init()).
+ *
+ * The credential's Kpersistent records go first: a failure there leaves the
+ * credential committed and is returned, and an interruption leaves a
+ * credential without some Kpersistent records, never a record whose
+ * credential handle is free for reuse.
  */
 AliroError DeleteSlotInternal(size_t slotIndex)
 {
@@ -239,13 +244,16 @@ AliroError DeleteSlotInternal(size_t slotIndex)
 	const CredentialHandle handle = SlotIndexToHandle(slotIndex);
 	const CryptoTypes::KeyId oldKeyId = sSlots[slotIndex].mKeyId;
 
+	auto error = AliroUd::PersistentKey::Store::DeleteAllForCredential(handle);
+	VerifyOrReturnStatus(error == ALIRO_NO_ERROR, error, LOG_ERR("Failed to delete Kpersistent records"));
+
 	JournalRecord journal{};
 	journal.mOp = JournalOp::Delete;
 	journal.mHandle = handle;
 	journal.mStagedKeyId = 0;
 	journal.mOldKeyId = oldKeyId;
 
-	auto error = Persistence::SaveJournal(journal);
+	error = Persistence::SaveJournal(journal);
 	VerifyOrReturnStatus(error == ALIRO_NO_ERROR, error, LOG_ERR("Failed to journal delete"));
 
 	error = Persistence::EraseSlot(slotIndex);
@@ -255,7 +263,6 @@ AliroError DeleteSlotInternal(size_t slotIndex)
 
 	KeyBackend::DestroyKey(oldKeyId);
 	PurgePreferredEntriesForHandle(handle);
-	AliroUd::PersistentKey::Store::DeleteAllForCredential(handle);
 
 	return Persistence::EraseJournal();
 }
@@ -487,7 +494,8 @@ AliroError Reset()
 {
 	Lock lock;
 
-	AliroError firstError{ ALIRO_NO_ERROR };
+	/* Every Kpersistent record, including any whose credential no longer exists. */
+	AliroError firstError = AliroUd::PersistentKey::Store::Reset();
 
 	for (size_t i = 0; i < kMaxCredentials; ++i) {
 		if (sSlots[i].mValid) {

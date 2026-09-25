@@ -16,7 +16,8 @@
  * @brief In-memory `storage/key/persistent_key_persistence.h` that stores
  * each record verbatim as `sizeof(Record)` bytes, as the settings backend
  * does, so tests can compare and scan the exact persisted image. Survives
- * `AliroUd::PersistentKey::Store::Init()`, simulating a reboot.
+ * `AliroUd::PersistentKey::Store::Init()`, simulating a reboot. Saves and
+ * erases honor `fake_power_loss.h`.
  */
 namespace AliroUd::PersistentKey::FakeStorage {
 
@@ -28,6 +29,9 @@ void Reset();
 
 /** @brief Arms one failure of the next `Persistence::SaveRecord()`. */
 void FailNextSave();
+
+/** @brief Arms one failure of the next `Persistence::EraseRecord()`. */
+void FailNextErase();
 
 /** @brief Writes `record` into `slotIndex` directly, as if left by an earlier boot. */
 void Preload(size_t slotIndex, const Record &record);

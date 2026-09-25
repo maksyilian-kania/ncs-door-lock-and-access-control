@@ -5,6 +5,7 @@
  */
 
 #include "fake_record_persistence.h"
+#include "fake_power_loss.h"
 
 #include <storage/key/persistent_key_persistence.h>
 
@@ -21,6 +22,7 @@ struct Slot {
 
 std::array<Slot, kMaxRecords> sSlots{};
 bool sFailNextSave{ false };
+bool sFailNextErase{ false };
 size_t sWriteCount{ 0 };
 
 } // namespace
@@ -29,12 +31,18 @@ void Reset()
 {
 	sSlots = {};
 	sFailNextSave = false;
+	sFailNextErase = false;
 	sWriteCount = 0;
 }
 
 void FailNextSave()
 {
 	sFailNextSave = true;
+}
+
+void FailNextErase()
+{
+	sFailNextErase = true;
 }
 
 void Preload(size_t slotIndex, const Record &record)
@@ -98,6 +106,9 @@ AliroError SaveRecord(size_t slotIndex, const Record &value)
 		sFailNextSave = false;
 		return ALIRO_ERROR_INTERNAL;
 	}
+	if (!FakePower::AllowDurableWrite()) {
+		return ALIRO_ERROR_INTERNAL;
+	}
 
 	std::memcpy(sSlots[slotIndex].mBytes.data(), &value, sizeof(Record));
 	sSlots[slotIndex].mPresent = true;
@@ -107,6 +118,14 @@ AliroError SaveRecord(size_t slotIndex, const Record &value)
 
 AliroError EraseRecord(size_t slotIndex)
 {
+	if (sFailNextErase) {
+		sFailNextErase = false;
+		return ALIRO_ERROR_INTERNAL;
+	}
+	if (!FakePower::AllowDurableWrite()) {
+		return ALIRO_ERROR_INTERNAL;
+	}
+
 	sSlots[slotIndex] = Slot{};
 	++sWriteCount;
 	return ALIRO_NO_ERROR;

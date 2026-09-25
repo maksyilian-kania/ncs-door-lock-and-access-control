@@ -54,20 +54,31 @@ psa_key_attributes_t GetVolatileKeyAttributes()
 	return attributes;
 }
 
-bool IsKeyPresent(psa_key_id_t keyId)
+} // namespace
+
+AliroError Exists(::Aliro::CryptoTypes::KeyId persistedKeyId, bool &outExists)
 {
-	if (keyId == 0) {
-		return false;
+	outExists = false;
+	if (persistedKeyId == 0) {
+		return ALIRO_NO_ERROR;
 	}
 
 	psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
-	const psa_status_t status = psa_get_key_attributes(keyId, &attributes);
+	const psa_status_t status = psa_get_key_attributes(static_cast<psa_key_id_t>(persistedKeyId), &attributes);
 	psa_reset_key_attributes(&attributes);
 
-	return status == PSA_SUCCESS;
-}
+	if (status == PSA_SUCCESS) {
+		outExists = true;
+		return ALIRO_NO_ERROR;
+	}
 
-} // namespace
+	if (status == PSA_ERROR_INVALID_HANDLE || status == PSA_ERROR_DOES_NOT_EXIST) {
+		return ALIRO_NO_ERROR;
+	}
+
+	LOG_ERR("psa_get_key_attributes(0x%08x) failed: %d", persistedKeyId, status);
+	return ALIRO_ERROR_INTERNAL;
+}
 
 AliroError DurablyOwn(::Aliro::CryptoTypes::KeyId sourceKeyId, ::Aliro::CryptoTypes::KeyId desiredPersistentKeyId,
 		      ::Aliro::CryptoTypes::KeyId &outActualPersistentKeyId)
@@ -80,7 +91,12 @@ AliroError DurablyOwn(::Aliro::CryptoTypes::KeyId sourceKeyId, ::Aliro::CryptoTy
 		return ALIRO_INVALID_ARGUMENT;
 	}
 
-	if (IsKeyPresent(static_cast<psa_key_id_t>(desiredPersistentKeyId))) {
+	bool inUse{ false };
+	const AliroError presenceError = Exists(desiredPersistentKeyId, inUse);
+	if (presenceError != ALIRO_NO_ERROR) {
+		return presenceError;
+	}
+	if (inUse) {
 		LOG_ERR("DurablyOwn(): persistent key ID 0x%08x already in use", desiredPersistentKeyId);
 		return ALIRO_KEY_ALREADY_EXISTS;
 	}
@@ -123,8 +139,10 @@ AliroError MintVolatileHandle(::Aliro::CryptoTypes::KeyId persistedKeyId, ::Alir
 
 AliroError Destroy(::Aliro::CryptoTypes::KeyId persistedKeyId)
 {
-	if (!IsKeyPresent(static_cast<psa_key_id_t>(persistedKeyId))) {
-		return ALIRO_NO_ERROR;
+	bool present{ false };
+	const AliroError presenceError = Exists(persistedKeyId, present);
+	if (presenceError != ALIRO_NO_ERROR || !present) {
+		return presenceError;
 	}
 
 	const psa_status_t status = psa_destroy_key(static_cast<psa_key_id_t>(persistedKeyId));

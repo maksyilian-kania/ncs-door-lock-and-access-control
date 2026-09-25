@@ -7,8 +7,9 @@
 mainmenu "Aliro NFC User Device - Persistent Key Test"
 
 # CONFIG_ALIRO_UD_MAX_PERSISTENT_KEYS_PER_CREDENTIAL/_PERSISTENT_KEY_ID_BASE
-# for the record engine under test, plus CONFIG_ALIRO_UD_MAX_CREDENTIALS,
-# which sizes its global record table.
+# for the record engine under test, plus the credential store options,
+# including CONFIG_ALIRO_UD_MAX_CREDENTIALS, which sizes its global record
+# table.
 rsource "../../../../../applications/aliro-nfc-user-device/src/storage/key/Kconfig"
 rsource "../../../../../applications/aliro-nfc-user-device/src/storage/credential/Kconfig"
 

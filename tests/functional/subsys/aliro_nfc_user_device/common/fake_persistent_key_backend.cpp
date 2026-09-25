@@ -134,6 +134,12 @@ AliroError MintVolatileHandle(CryptoTypes::KeyId persistedKeyId, CryptoTypes::Ke
 	return ALIRO_NO_ERROR;
 }
 
+AliroError Exists(CryptoTypes::KeyId persistedKeyId, bool &outExists)
+{
+	outExists = Test::Find(persistedKeyId) != nullptr;
+	return ALIRO_NO_ERROR;
+}
+
 AliroError Destroy(CryptoTypes::KeyId persistedKeyId)
 {
 	auto *mapping = Test::Find(persistedKeyId);

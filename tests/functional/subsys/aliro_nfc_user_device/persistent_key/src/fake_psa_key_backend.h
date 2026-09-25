@@ -27,7 +27,8 @@
  * Input and temporary objects are caller-owned and released with
  * `DestroyCallerKey()`, standing in for `Crypto::DestroyKey()`. Durable
  * objects are released only by `Backend::Destroy()`. Durable objects survive
- * `AliroUd::PersistentKey::Store::Init()`, simulating a reboot.
+ * `AliroUd::PersistentKey::Store::Init()`, simulating a reboot. Durable
+ * creation and destruction honor `fake_power_loss.h`.
  *
  * Key material is only ever compared, never returned or formatted.
  */
@@ -45,10 +46,15 @@ enum class Fault : uint8_t {
 	None,
 	DurablyOwn,
 	MintVolatileHandle,
+	Exists,
+	Destroy,
 };
 
 /** @brief Destroys every object and clears every counter and armed fault (first boot). */
 void Reset();
+
+/** @brief Simulates a reboot: input and temporary objects vanish, durable objects and counters survive. */
+void Reboot();
 
 /** @brief Arms one failure of the next call to the given backend operation. */
 void FailNext(Fault fault);
@@ -79,6 +85,9 @@ size_t LiveCount(Kind kind);
 
 /** @brief Number of `Backend::Destroy()` calls that released a live durable object. */
 size_t DurableDestroyCount();
+
+/** @brief Number of durable objects `Backend::DurablyOwn()` created. */
+size_t DurableCreateCount();
 
 /** @brief Number of destroy attempts on an object that was not live (double destroy or unknown ID). */
 size_t InvalidDestroyCount();

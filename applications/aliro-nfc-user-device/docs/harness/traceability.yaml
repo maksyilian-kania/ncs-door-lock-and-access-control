@@ -96,13 +96,15 @@ requirements:
     host:
       - cli_info.test_credential_staging_transaction_commits
       - cli_info.test_mailbox_inspect_init_read_and_erase_on_delete
+      - persistent_key (C2.2 credential delete/reset Kpersistent cascade and failure propagation)
     target: []
   target_assignment: C7.2 delete and factory reset on the DK.
   stack_gate: none
   evidence:
     - evidence/C0.1.md
     - evidence/C1.4.md
-  notes: Open application gap (C0.1 item 1). Mailbox erase on credential delete/reset is owned by C3.2; the discarded Kpersistent cleanup result is owned by C2.2. See evidence/C1.4.md.
+    - evidence/C2.2.md
+  notes: Open application gap (C0.1 item 1). Mailbox erase on credential delete/reset is owned by C3.2. C2.2 closed the discarded Kpersistent cleanup result; see evidence/C1.4.md and evidence/C2.2.md.
 
 - requirement: ALIRO-UD-SYRS-P1-006
   summary: Reject malformed or inconsistent provisioning input without changing committed state.
@@ -126,6 +128,7 @@ requirements:
     host:
       - mailbox (store reboot simulation and fault-injection cases)
       - persistent_key (C2.1 record semantics, including reload of committed records)
+      - persistent_key (C2.2 simulated power loss at every durable step and boot recovery)
     target: []
   target_assignment: C7.1 reset and actual power-loss qualification.
   stack_gate: none
@@ -133,7 +136,8 @@ requirements:
     - tests/functional/subsys/aliro_nfc_user_device/mailbox/src/test_mailbox_store.cpp
     - tests/functional/subsys/aliro_nfc_user_device/mailbox/src/test_mailbox_fault_injection.cpp
     - evidence/C2.1.md
-  notes: C2.1 covers Kpersistent record semantics; crash-safe recovery is C2.2-C2.3; document persistence is C3.1.
+    - evidence/C2.2.md
+  notes: C2.1 covers Kpersistent record semantics and C2.2 its crash-safe recovery on host; the C2.3 fault matrix remains. Document persistence is C3.1.
 
 - requirement: ALIRO-UD-SYRS-P1-008
   summary: No export of the credential private key, Kpersistent, or session keys via CLI, NFC, logs, or diagnostics.
@@ -142,13 +146,15 @@ requirements:
   verification:
     host:
       - persistent_key (no Kpersistent bytes in persisted records; PSA handle ownership)
+      - persistent_key (C2.2 no unowned Kpersistent PSA object after recovery)
     target: []
   target_assignment: C7.1 non-exportability on target; C7.4 log and artifact audit.
   stack_gate: none
   evidence:
     - evidence/C1.4.md
     - evidence/C2.1.md
-  notes: C2.1 covers Kpersistent persisted-record content and handle ownership; failure-path cleanup is C2.2-C2.3. Credential private-key and session-key clauses remain open.
+    - evidence/C2.2.md
+  notes: C2.1 covers Kpersistent persisted-record content and handle ownership; C2.2 destroys orphaned Kpersistent keys; the C2.3 fault matrix remains. Credential private-key and session-key clauses remain open.
 
 - requirement: ALIRO-UD-SYRS-P1-009
   summary: At least 16 reader_group_identifier bindings per Access Credential.
@@ -640,11 +646,13 @@ requirements:
   verification:
     host:
       - persistent_key (C2.1 exact-pair storage, replacement, capacity, deletion)
+      - persistent_key (C2.2 crash-safe replacement and deletion)
     target: []
   stack_gate: none
   evidence:
     - evidence/C2.1.md
-  notes: Derivation is stack-owned. C2.1 covers the application record store only.
+    - evidence/C2.2.md
+  notes: Derivation is stack-owned. C2.1 and C2.2 cover the application record store only.
 
 - requirement: ALIRO-UD-SYRS-P2-003
   summary: Fast-phase derivation of CryptogramSK and ExpeditedSK keys.

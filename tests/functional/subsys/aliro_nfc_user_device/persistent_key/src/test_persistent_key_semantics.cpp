@@ -6,6 +6,7 @@
 
 #include <zephyr/ztest.h>
 
+#include "fake_power_loss.h"
 #include "fake_psa_key_backend.h"
 #include "fake_record_persistence.h"
 #include "storage/key/persistent_key_store.h"
@@ -167,6 +168,7 @@ void ResetBeforeEachTest(void *fixture)
 {
 	(void)fixture;
 
+	::AliroUd::PersistentKey::FakePower::Reset();
 	FakePsa::Reset();
 	FakeStorage::Reset();
 	zassert_equal(ALIRO_NO_ERROR, Store::Init(), "store init must succeed on empty storage");

@@ -55,7 +55,24 @@ AliroError DurablyOwn(::Aliro::CryptoTypes::KeyId sourceKeyId, ::Aliro::CryptoTy
 AliroError MintVolatileHandle(::Aliro::CryptoTypes::KeyId persistedKeyId,
 			      ::Aliro::CryptoTypes::KeyId &outVolatileKeyId);
 
-/** @brief Destroys a durable persistent key previously created by `DurablyOwn()`. Idempotent. */
+/**
+ * @brief Reports whether a durable persistent key exists at `persistedKeyId`.
+ *
+ * @param persistedKeyId The persistent PSA key id to query.
+ * @param outExists Set to true only when the key is known to exist.
+ *
+ * @return `ALIRO_NO_ERROR` when presence was determined, error code when
+ * the key store could not answer (`outExists` is then false and must not be
+ * taken as "absent").
+ */
+AliroError Exists(::Aliro::CryptoTypes::KeyId persistedKeyId, bool &outExists);
+
+/**
+ * @brief Destroys a durable persistent key previously created by `DurablyOwn()`.
+ *
+ * Idempotent: an absent key succeeds. Returns an error, leaving the key in
+ * place, when presence cannot be determined or destruction fails.
+ */
 AliroError Destroy(::Aliro::CryptoTypes::KeyId persistedKeyId);
 
 } // namespace AliroUd::PersistentKey::Backend
