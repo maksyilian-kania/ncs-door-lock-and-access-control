@@ -30,3 +30,4 @@ _pycache__/
 twister-out*
 
 .codegraph
+/applications/aliro-nfc-user-device/docs/harness/STATE.md

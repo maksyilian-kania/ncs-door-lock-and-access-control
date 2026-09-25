@@ -1,0 +1,30 @@
+---
+description: Enforce Aliro User Device application slice and stack ownership boundaries
+alwaysApply: true
+---
+
+# Aliro User Device boundary
+
+Apply this rule when implementing or changing application behavior under
+`applications/aliro-nfc-user-device/` or its functional tests. Investigation,
+review, and harness/documentation-only maintenance do not require a target
+unless they implement slice deliverables.
+
+- An implementation request must explicitly provide
+  `TARGET_SLICE=Cx.y`.
+- If the target is missing, unknown, ambiguous, complete, or has an
+  incomplete prerequisite, ask the user; never choose a slice.
+- Execute exactly one slice from
+  `applications/aliro-nfc-user-device/docs/harness/slices/` unless the user
+  explicitly changes scope.
+- Require the local, untracked `docs/Requirements.pdf` before interpreting a
+  project requirement.
+- Modify only application-owned code/tests in this repository.
+- Never modify the sibling `ncs-aliro` checkout.
+- Never duplicate, replace, patch around, or locally implement stack-owned
+  protocol behavior.
+- Record a precise stack blocker and stop that path when required behavior
+  is missing or defective.
+- Implementation leaves changes uncommitted.
+- Commit only through an explicit verification/commit request after all
+  selected-slice checks pass.

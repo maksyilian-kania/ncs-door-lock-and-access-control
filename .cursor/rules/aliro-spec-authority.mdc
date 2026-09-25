@@ -1,0 +1,22 @@
+---
+description: Use the Aliro specification MCP as authority for every Aliro protocol question and decision
+alwaysApply: true
+---
+
+# Aliro specification authority
+
+For every Aliro-related protocol question or implementation decision:
+
+- Query the configured Aliro specification MCP before answering or editing.
+- Treat Aliro 1.0 as the normative protocol authority.
+- Cite the retrieved specification section/page for material decisions.
+- Treat the local `applications/aliro-nfc-user-device/docs/Requirements.pdf`
+  as selected project scope only; it cannot override the specification.
+- Treat public `ncs-aliro` headers as the integration contract, not normative
+  protocol behavior.
+- Do not infer normative behavior from application code, Reader code, tests,
+  historical evidence, or memory.
+
+If the specification MCP is unavailable or does not cover the question, say
+so and stop protocol-sensitive work. Non-protocol application work may
+continue when it does not depend on the unresolved behavior.

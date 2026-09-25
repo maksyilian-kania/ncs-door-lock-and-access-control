@@ -1,0 +1,27 @@
+---
+description: Maintain the ignored Aliro User Device continuity checkpoint
+alwaysApply: true
+---
+
+# Aliro User Device local state
+
+For work under `applications/aliro-nfc-user-device/` or its functional
+tests:
+
+- Read `docs/harness/STATE.md` at task start and after a resume or known
+  context transition.
+- If absent, initialize it from `docs/harness/STATE.template.md`.
+- Treat Git, source, slice files, evidence, and specification citations as
+  authoritative over STATE.
+- Refresh STATE only when continuity-relevant context changes.
+- Keep `# Context` plus `## Current status`, at most 25 lines total and six
+  status bullets.
+- Put newest information first and remove stale/superseded items.
+- Prefer pointers to slices, evidence, commits, and source paths.
+- Never store logs, detailed verification, full blocker analysis, secrets,
+  keys, or raw provisioning material.
+- Keep STATE ignored and unstaged; never commit it.
+- Promote durable information to evidence, traceability, a slice file, or a
+  commit.
+- Before the final response, ensure STATE accurately summarizes current
+  continuity when meaningful context changed.
