@@ -31,8 +31,8 @@
  * pressing the button (Window::Open()) first -> the same AUTH0 command
  * proceeds without ever calling it.
  *
- * ncs-aliro WP6 does not implement AUTH0 cryptography yet, so the wire
- * response is the same empty-data failure status word in both cases
+ * The AUTH0 response is the same successful credential_ePubK response in
+ * both cases, differing only in that freshly generated key
  * (ALIRO-UD-SYRS-P1-031: "AUTH0 ... externally observable data independent
  * of credential/reader-key/Kpersistent existence"); only the deferred
  * NotifyAuthenticationRequired() delivery differs, which is exactly the
@@ -228,9 +228,15 @@ ZTEST(aliro_ud_authorization_e2e, test_auth0_policy_0x03_with_open_window_does_n
 }
 
 /**
- * @brief ALIRO-UD-SYRS-P1-031: the AUTH0 response bytes are identical
- * whether or not the authorization window is open - only the deferred
+ * @brief ALIRO-UD-SYRS-P1-031: the AUTH0 response is identical whether or
+ * not the authorization window is open - only the deferred
  * NotifyAuthenticationRequired() delivery (asserted above) differs.
+ *
+ * Aliro 1.0 Specification and Test Plan, 26-42802-001, section 8.3.3.2.6,
+ * p. 69 requires a new credential_ePubK in every AUTH0 response, so its
+ * 64 coordinate bytes differ between the two transactions regardless of
+ * window state. Every other byte - the Table 8-5 (p. 67) 0x86 TLV header,
+ * the uncompressed-point prefix, and the status word - must be identical.
  */
 ZTEST(aliro_ud_authorization_e2e, test_auth0_response_is_independent_of_window_state)
 {
@@ -265,10 +271,21 @@ ZTEST(aliro_ud_authorization_e2e, test_auth0_response_is_independent_of_window_s
 	SettleWorker();
 	const auto responseWithWindow = AliroUdTest::FakeNfc::GetLastResponse();
 
+	/* 0x86 0x41 0x04 || x || y || SW1 SW2 */
+	constexpr size_t kCoordinatesOffset{ 3 };
+	constexpr size_t kCoordinatesLength{ 64 };
+	constexpr size_t kResponseLength{ kCoordinatesOffset + kCoordinatesLength + 2 };
+
+	zassert_equal(kResponseLength, responseWithoutWindow.size(), "Unexpected AUTH0 response length");
 	zassert_equal(responseWithoutWindow.size(), responseWithWindow.size(),
 		      "AUTH0 response length must not depend on window state");
-	zassert_mem_equal(responseWithoutWindow.data(), responseWithWindow.data(), responseWithoutWindow.size(),
-			   "AUTH0 response bytes must not depend on window state");
+	zassert_mem_equal(responseWithoutWindow.data(), responseWithWindow.data(), kCoordinatesOffset,
+			  "AUTH0 response framing must not depend on window state");
+	zassert_mem_equal(responseWithoutWindow.data() + kCoordinatesOffset + kCoordinatesLength,
+			  responseWithWindow.data() + kCoordinatesOffset + kCoordinatesLength, 2,
+			  "AUTH0 status word must not depend on window state");
+	zassert_equal(0x90, responseWithWindow[kResponseLength - 2], "AUTH0 must succeed");
+	zassert_equal(0x00, responseWithWindow[kResponseLength - 1], "AUTH0 must succeed");
 
 	PostFieldOff();
 	SettleWorker();
