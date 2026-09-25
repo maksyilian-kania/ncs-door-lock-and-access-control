@@ -102,6 +102,21 @@ size_t SlotIndexOf(const Record *record)
 	return static_cast<size_t>(record - sRecords.data());
 }
 
+/*
+ * Record handles are never kInvalidPersistentKeyHandle and never alias a
+ * live record, even after sNextHandle wraps or Init() restores a persisted
+ * handle at the top of the range. At most kMaxRecords handles are live, so
+ * the scan terminates.
+ */
+PersistentKeyHandle NextFreeHandleLocked()
+{
+	PersistentKeyHandle candidate = sNextHandle;
+	while (candidate == kInvalidPersistentKeyHandle || FindLocked(candidate) != nullptr) {
+		++candidate;
+	}
+	return candidate;
+}
+
 AliroError PersistLocked(size_t slotIndex, const Record &record)
 {
 	return Persistence::SaveRecord(slotIndex, record);
@@ -150,12 +165,14 @@ AliroError Lookup(CredentialHandle handle, const ReaderGroupSubIdentifier &reade
 		return ALIRO_ERROR_UNKNOWN;
 	}
 
-	const AliroError error = Backend::MintVolatileHandle(found->mPersistedKeyId, outKeyId);
+	CryptoTypes::KeyId mintedKeyId{ 0 };
+	const AliroError error = Backend::MintVolatileHandle(found->mPersistedKeyId, mintedKeyId);
 	if (error != ALIRO_NO_ERROR) {
 		return error;
 	}
 
 	outRecord = found->mHandle;
+	outKeyId = mintedKeyId;
 	return ALIRO_NO_ERROR;
 }
 
@@ -163,6 +180,10 @@ AliroError Replace(CredentialHandle handle, const ReaderGroupSubIdentifier &read
 		    CryptoTypes::KeyId keyId, PersistentKeyHandle &outRecord)
 {
 	outRecord = kInvalidPersistentKeyHandle;
+	if (handle == kInvalidCredentialHandle || keyId == 0) {
+		return ALIRO_INVALID_ARGUMENT;
+	}
+
 	Lock lock;
 
 	Record *existing = FindLocked(handle, readerGroupSubIdentifier);
@@ -198,7 +219,7 @@ AliroError Replace(CredentialHandle handle, const ReaderGroupSubIdentifier &read
 
 	Record newRecord{};
 	newRecord.mValid = true;
-	newRecord.mHandle = (existing != nullptr) ? existing->mHandle : sNextHandle;
+	newRecord.mHandle = (existing != nullptr) ? existing->mHandle : NextFreeHandleLocked();
 	newRecord.mCredentialHandle = handle;
 	newRecord.mReaderGroupSubIdentifier = readerGroupSubIdentifier;
 	newRecord.mPersistedKeyId = actualPersistedKeyId;
@@ -211,10 +232,7 @@ AliroError Replace(CredentialHandle handle, const ReaderGroupSubIdentifier &read
 
 	*targetSlot = newRecord;
 	if (existing == nullptr) {
-		++sNextHandle;
-		if (sNextHandle == kInvalidPersistentKeyHandle) {
-			sNextHandle = 1;
-		}
+		sNextHandle = newRecord.mHandle + 1;
 	}
 
 	/* Only now retire the old key: the new record is durably committed. */

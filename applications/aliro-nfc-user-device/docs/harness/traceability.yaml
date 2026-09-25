@@ -125,26 +125,30 @@ requirements:
   verification:
     host:
       - mailbox (store reboot simulation and fault-injection cases)
+      - persistent_key (C2.1 record semantics, including reload of committed records)
     target: []
   target_assignment: C7.1 reset and actual power-loss qualification.
   stack_gate: none
   evidence:
     - tests/functional/subsys/aliro_nfc_user_device/mailbox/src/test_mailbox_store.cpp
     - tests/functional/subsys/aliro_nfc_user_device/mailbox/src/test_mailbox_fault_injection.cpp
-  notes: Kpersistent recovery is C2.1-C2.3; document persistence is C3.1.
+    - evidence/C2.1.md
+  notes: C2.1 covers Kpersistent record semantics; crash-safe recovery is C2.2-C2.3; document persistence is C3.1.
 
 - requirement: ALIRO-UD-SYRS-P1-008
   summary: No export of the credential private key, Kpersistent, or session keys via CLI, NFC, logs, or diagnostics.
   application_slices: [C2.1, C2.2, C2.3, C7.1, C7.4]
   application_status: planned
   verification:
-    host: []
+    host:
+      - persistent_key (no Kpersistent bytes in persisted records; PSA handle ownership)
     target: []
   target_assignment: C7.1 non-exportability on target; C7.4 log and artifact audit.
   stack_gate: none
   evidence:
     - evidence/C1.4.md
-  notes: No current host test asserts non-exportability. Kpersistent handle ownership is C2.1-C2.3.
+    - evidence/C2.1.md
+  notes: C2.1 covers Kpersistent persisted-record content and handle ownership; failure-path cleanup is C2.2-C2.3. Credential private-key and session-key clauses remain open.
 
 - requirement: ALIRO-UD-SYRS-P1-009
   summary: At least 16 reader_group_identifier bindings per Access Credential.
@@ -634,10 +638,13 @@ requirements:
   application_slices: [C2.1, C2.2, C2.3, C4.1, C4.2, C7.1, C7.2]
   application_status: planned
   verification:
-    host: []
+    host:
+      - persistent_key (C2.1 exact-pair storage, replacement, capacity, deletion)
     target: []
   stack_gate: none
-  notes: Not audited in C1.4.
+  evidence:
+    - evidence/C2.1.md
+  notes: Derivation is stack-owned. C2.1 covers the application record store only.
 
 - requirement: ALIRO-UD-SYRS-P2-003
   summary: Fast-phase derivation of CryptogramSK and ExpeditedSK keys.

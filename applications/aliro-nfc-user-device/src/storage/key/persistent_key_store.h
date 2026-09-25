@@ -24,23 +24,45 @@ namespace AliroUd::PersistentKey::Store {
 /** @brief Initializes the persistence and key backends, loading every persisted record. */
 AliroError Init();
 
-/** @copydoc ::Aliro::Interface::UserDevice::PersistentKey::Lookup */
+/**
+ * @copydoc ::Aliro::Interface::UserDevice::PersistentKey::Lookup
+ *
+ * Returns `ALIRO_ERROR_UNKNOWN` when no record matches the exact pair, or
+ * the backend error when minting the temporary handle fails; both outputs
+ * keep their failure values in either case.
+ */
 AliroError Lookup(::Aliro::UserDevice::CredentialHandle handle,
 		   const ::Aliro::UserDevice::ReaderGroupSubIdentifier &readerGroupSubIdentifier,
 		   ::Aliro::UserDevice::PersistentKeyHandle &outRecord, ::Aliro::CryptoTypes::KeyId &outKeyId);
 
-/** @copydoc ::Aliro::Interface::UserDevice::PersistentKey::Replace */
+/**
+ * @copydoc ::Aliro::Interface::UserDevice::PersistentKey::Replace
+ *
+ * Returns `ALIRO_INVALID_ARGUMENT` for `kInvalidCredentialHandle` or a zero
+ * `keyId`, and `ALIRO_NO_MEMORY` when inserting a new pair would exceed the
+ * per-credential or global capacity. `keyId` stays owned by the caller on
+ * every path.
+ */
 AliroError Replace(::Aliro::UserDevice::CredentialHandle handle,
 		    const ::Aliro::UserDevice::ReaderGroupSubIdentifier &readerGroupSubIdentifier,
 		    ::Aliro::CryptoTypes::KeyId keyId, ::Aliro::UserDevice::PersistentKeyHandle &outRecord);
 
-/** @copydoc ::Aliro::Interface::UserDevice::PersistentKey::Delete */
+/**
+ * @copydoc ::Aliro::Interface::UserDevice::PersistentKey::Delete
+ *
+ * Deleting an invalid, unknown, or already-deleted handle succeeds without
+ * side effects.
+ */
 AliroError Delete(::Aliro::UserDevice::PersistentKeyHandle record);
 
 /** @copydoc ::Aliro::Interface::UserDevice::PersistentKey::Reset */
 AliroError Reset();
 
-/** @brief Deletes every persistent-key record for one credential (used by Credential::Store::Delete/Reset). */
+/**
+ * @brief Deletes every persistent-key record for one credential (used by
+ * Credential::Store::Delete/Reset). A credential without records succeeds
+ * without side effects.
+ */
 AliroError DeleteAllForCredential(::Aliro::UserDevice::CredentialHandle handle);
 
 } // namespace AliroUd::PersistentKey::Store

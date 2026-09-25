@@ -1,0 +1,15 @@
+common:
+  build_only: false
+  platform_allow: native_sim/native/64
+  integration_platforms:
+    - native_sim/native/64
+  tags: aliro_nfc_user_device
+tests:
+  aliro_nfc_user_device.functional.persistent_key:
+    {}
+  # Smallest configurable capacities: one credential with one record, so the
+  # per-credential and global limits coincide at a single record.
+  aliro_nfc_user_device.functional.persistent_key.min_capacity:
+    extra_configs:
+      - CONFIG_ALIRO_UD_MAX_CREDENTIALS=1
+      - CONFIG_ALIRO_UD_MAX_PERSISTENT_KEYS_PER_CREDENTIAL=1
