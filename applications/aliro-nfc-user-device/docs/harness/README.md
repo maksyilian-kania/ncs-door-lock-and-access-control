@@ -63,10 +63,11 @@ The scripts under `scripts/` enforce harness structure:
 - [C2.2 — Crash-safe persistence and recovery](slices/C2.2-persistent-key-recovery.md)
 - [C2.3 — Persistence fault injection](slices/C2.3-persistent-key-fault-injection.md)
 
-### C3 — Durable documents
+### C3 — Durable documents and credential selection
 
 - [C3.1 — Snapshot and persistence behavior](slices/C3.1-document-snapshots.md)
 - [C3.2 — Provisioning validation](slices/C3.2-document-provisioning.md)
+- [C3.3 — Credential binding capacity and selection](slices/C3.3-credential-selection-capacity.md)
 
 ### C4 — Expedited Fast application integration
 
@@ -99,10 +100,10 @@ The scripts under `scripts/` enforce harness structure:
 1. C0.1.
 2. C1.1.
 3. C1.2 and C1.3; then C1.4.
-4. C2.1 → C2.2 → C2.3 and C3.1 → C3.2 may proceed independently
-   after C1.1.
+4. C2.1 → C2.2 → C2.3 and C3.1 → C3.2 may proceed independently;
+   C3.2 also requires C1.3. C3.3 may start after C1.2.
 5. C4.1 → C4.2 → C4.3 → C4.4 requires C1.2, C1.3, and C2.3.
-6. C5.1 → C5.2 → C5.3 requires C1.2 and C3.2.
+6. C5.1 → C5.2 → C5.3 requires C1.2, C1.3, and C3.2.
 7. C6.1 → C6.2 → C6.3 requires the upstream stack gate to be resolved.
 8. C7 runs only after the corresponding host/integration slices pass.
 

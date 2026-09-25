@@ -148,7 +148,7 @@ requirements:
 
 - requirement: ALIRO-UD-SYRS-P1-009
   summary: At least 16 reader_group_identifier bindings per Access Credential.
-  application_slices: [C7.2]
+  application_slices: [C3.3, C7.2]
   application_status: planned
   verification:
     host: []
@@ -157,11 +157,11 @@ requirements:
   stack_gate: none
   evidence:
     - evidence/C1.4.md
-  notes: Host gap without an owning host slice; see evidence/C1.4.md.
+  notes: Host capacity and Standard integration are assigned to C3.3; physical conformance remains C7.2.
 
 - requirement: ALIRO-UD-SYRS-P1-010
   summary: CLI method to select each Access Credential sharing a reader identifier.
-  application_slices: [C7.2]
+  application_slices: [C3.3, C7.2]
   application_status: planned
   verification:
     host: []
@@ -170,7 +170,7 @@ requirements:
   stack_gate: none
   evidence:
     - evidence/C1.4.md
-  notes: Host gap without an owning host slice; see evidence/C1.4.md.
+  notes: Host CLI selection and Standard integration are assigned to C3.3; physical demonstration remains C7.2.
 
 - requirement: ALIRO-UD-SYRS-P1-011
   summary: DK button press opens a configurable 1-300 s authorization window, default 30 s.
