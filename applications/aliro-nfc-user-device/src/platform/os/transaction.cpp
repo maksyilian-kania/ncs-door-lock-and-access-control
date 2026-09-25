@@ -9,16 +9,10 @@
 #include <aliro/user_device/interface.h>
 
 /*
- * Placeholder implementation of Aliro::Interface::UserDevice::Transaction,
- * added only so the application links against the currently checked-out
- * stack: ncs-aliro WP5.5 (decision D8) introduces this contract and calls
- * it unconditionally at the end of every User Device transaction
- * (stack/src/user_device/event_handler.cpp). No application-level reaction
- * to transaction outcomes exists yet (no WP5.5/P1 code path reports
- * `TransactionOutcome::Success`; this only ever observes `Failed`/
- * `Aborted`, per that enum's own documentation) - this stub only logs the
- * coarse, privacy-safe outcome. A later AWP may add real behavior (for
- * example, LED/UX feedback) if APP_PLAN.md is extended to require it.
+ * Aliro::Interface::UserDevice::Transaction: the stack delivers at most one
+ * NotifyResult() per session generation, with an outcome of `Success` (a
+ * final EXCHANGE Reader status of success), `Failed`, or `Aborted`. The
+ * application's only reaction is logging the coarse, privacy-safe outcome.
  */
 LOG_MODULE_DECLARE(aliro_ud_stack, CONFIG_NCS_ALIRO_USER_DEVICE_LOG_LEVEL_VALUE);
 

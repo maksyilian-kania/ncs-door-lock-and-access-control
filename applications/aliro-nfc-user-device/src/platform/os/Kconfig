@@ -16,6 +16,22 @@ config ALIRO_UD_OS_MAX_TIMERS
 	  application-owned timers (for example the AWP4 authorization
 	  window).
 
+config ALIRO_UD_OS_TIMER_THREAD_STACK_SIZE
+	int "Os::Timer callback work queue stack size"
+	default 2048
+	help
+	  Stack size of the dedicated work queue thread that runs
+	  Aliro::Interface::UserDevice::Os::Timer expiry callbacks. Stack
+	  callbacks take the stack mutex and may log, so they never run in
+	  the k_timer expiry ISR.
+
+config ALIRO_UD_OS_TIMER_THREAD_PRIORITY
+	int "Os::Timer callback work queue priority"
+	default 5
+	help
+	  Zephyr preemptible priority (K_PRIO_PREEMPT) of the Os::Timer
+	  callback work queue thread.
+
 module = ALIRO_UD_OS
 module-str = ALIRO_UD_OS
 module-dep = LOG

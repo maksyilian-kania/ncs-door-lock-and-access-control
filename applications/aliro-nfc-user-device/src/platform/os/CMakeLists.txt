@@ -14,6 +14,6 @@ target_sources(app PRIVATE
   os_logging.cpp
   app_status.cpp
   # Aliro::Interface::UserDevice::Transaction contract (WP5.5 decision D8);
-  # a log-only stub is sufficient until a later AWP requires real behavior.
+  # logs each transaction outcome.
   transaction.cpp
 )

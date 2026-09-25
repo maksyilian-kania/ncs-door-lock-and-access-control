@@ -439,4 +439,145 @@ bool KeySlot(const PublicKey &credentialPublicKey, std::array<uint8_t, 8> &outKe
 	return true;
 }
 
+bool EncryptReaderCommand(const SymmetricKey &expeditedSkReader, uint32_t readerCounter, const Bytes &plaintext,
+			  Bytes &outEncrypted)
+{
+	outEncrypted.clear();
+	if (!EnsurePsa()) {
+		return false;
+	}
+
+	psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+	psa_set_key_type(&attributes, PSA_KEY_TYPE_AES);
+	psa_set_key_bits(&attributes, 256);
+	psa_set_key_algorithm(&attributes, PSA_ALG_GCM);
+	psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_ENCRYPT);
+
+	psa_key_id_t keyId{};
+	if (psa_import_key(&attributes, expeditedSkReader.data(), expeditedSkReader.size(), &keyId) != PSA_SUCCESS) {
+		return false;
+	}
+
+	const std::array<uint8_t, 12> nonce{ 0x00,
+					     0x00,
+					     0x00,
+					     0x00,
+					     0x00,
+					     0x00,
+					     0x00,
+					     0x00,
+					     static_cast<uint8_t>(readerCounter >> 24),
+					     static_cast<uint8_t>(readerCounter >> 16),
+					     static_cast<uint8_t>(readerCounter >> 8),
+					     static_cast<uint8_t>(readerCounter) };
+	outEncrypted.resize(plaintext.size() + 16);
+	size_t length{};
+	const psa_status_t status = psa_aead_encrypt(keyId, PSA_ALG_GCM, nonce.data(), nonce.size(), nullptr, 0,
+						     plaintext.data(), plaintext.size(), outEncrypted.data(),
+						     outEncrypted.size(), &length);
+	psa_destroy_key(keyId);
+	if (status != PSA_SUCCESS || length != outEncrypted.size()) {
+		outEncrypted.clear();
+		return false;
+	}
+	return true;
+}
+
+Bytes ExchangeCommand(const Bytes &encrypted)
+{
+	return CaseFourApdu(kAliroCla, 0xC9, encrypted);
+}
+
+Bytes ControlFlowCommand(uint8_t s1Parameter, uint8_t s2Parameter)
+{
+	Bytes data{};
+	AppendTlv(data, 0x41, &s1Parameter, 1);
+	AppendTlv(data, 0x42, &s2Parameter, 1);
+	Bytes apdu{ kAliroCla, 0x3C, 0x00, 0x00, static_cast<uint8_t>(data.size()) };
+	apdu.insert(apdu.end(), data.begin(), data.end());
+	return apdu;
+}
+
+namespace Exchange {
+
+Bytes AtomicSession(bool start)
+{
+	const uint8_t option = start ? 0x01 : 0x00;
+	Bytes out{};
+	AppendTlv(out, 0x8C, &option, 1);
+	return out;
+}
+
+Bytes ReadRequest(uint16_t offset, uint16_t length)
+{
+	const std::array<uint8_t, 4> value{ static_cast<uint8_t>(offset >> 8), static_cast<uint8_t>(offset),
+					    static_cast<uint8_t>(length >> 8), static_cast<uint8_t>(length) };
+	Bytes out{};
+	AppendTlv(out, 0x87, value);
+	return out;
+}
+
+Bytes WriteRequest(uint16_t offset, const Bytes &data)
+{
+	Bytes value{ static_cast<uint8_t>(offset >> 8), static_cast<uint8_t>(offset) };
+	value.insert(value.end(), data.begin(), data.end());
+	Bytes out{};
+	AppendTlv(out, 0x8A, value.data(), value.size());
+	return out;
+}
+
+Bytes SetRequest(uint16_t offset, uint16_t length, uint8_t value)
+{
+	const std::array<uint8_t, 5> fields{ static_cast<uint8_t>(offset >> 8), static_cast<uint8_t>(offset),
+					     static_cast<uint8_t>(length >> 8), static_cast<uint8_t>(length), value };
+	Bytes out{};
+	AppendTlv(out, 0x95, fields);
+	return out;
+}
+
+Bytes MailboxCommands(const Bytes &requests)
+{
+	Bytes out{};
+	AppendTlv(out, 0xBA, requests.data(), requests.size());
+	return out;
+}
+
+Bytes ReaderStatus(uint8_t firstByte, uint8_t secondByte)
+{
+	const std::array<uint8_t, 2> value{ firstByte, secondByte };
+	Bytes out{};
+	AppendTlv(out, 0x97, value);
+	return out;
+}
+
+} // namespace Exchange
+
+bool ParseExchangeResponse(const Bytes &plaintext, ExchangeResponse &outResponse)
+{
+	outResponse = ExchangeResponse{};
+	std::vector<Bytes> blocks{};
+	size_t offset = 0;
+	while (offset < plaintext.size()) {
+		if (offset + 2 > plaintext.size()) {
+			return false;
+		}
+		const size_t length = (static_cast<size_t>(plaintext[offset]) << 8) | plaintext[offset + 1];
+		offset += 2;
+		if (offset + length > plaintext.size()) {
+			return false;
+		}
+		const auto begin = plaintext.begin() + static_cast<std::ptrdiff_t>(offset);
+		blocks.emplace_back(begin, begin + static_cast<std::ptrdiff_t>(length));
+		offset += length;
+	}
+
+	if (blocks.empty() || blocks.back().size() != 2) {
+		return false;
+	}
+	outResponse.mStatus = static_cast<uint16_t>((blocks.back()[0] << 8) | blocks.back()[1]);
+	blocks.pop_back();
+	outResponse.mReadData = std::move(blocks);
+	return true;
+}
+
 } // namespace AliroUdTest::Reader

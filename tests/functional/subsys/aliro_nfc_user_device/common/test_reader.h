@@ -139,4 +139,54 @@ bool DecryptDeviceResponse(const SymmetricKey &expeditedSkDevice, uint32_t devic
 /** @brief First 8 bytes of SHA-1 over the uncompressed Access Credential public key (section 8.3.3.4.2, p. 76). */
 bool KeySlot(const PublicKey &credentialPublicKey, std::array<uint8_t, 8> &outKeySlot);
 
+/**
+ * @brief Encrypts a secure-channel command payload with
+ * `IV = 0x0000000000000000 || reader_counter` (section 8.3.1.8, p. 56).
+ * Returns `encrypted_payload || authentication_tag`.
+ */
+bool EncryptReaderCommand(const SymmetricKey &expeditedSkReader, uint32_t readerCounter, const Bytes &plaintext,
+			  Bytes &outEncrypted);
+
+/** @brief EXCHANGE command APDU (Table 8-14, p. 81) carrying `encrypted_payload || authentication_tag`. */
+Bytes ExchangeCommand(const Bytes &encrypted);
+
+/** @brief CONTROL FLOW command APDU (Tables 10-5 and 10-6, p. 97). */
+Bytes ControlFlowCommand(uint8_t s1Parameter, uint8_t s2Parameter);
+
+/** @brief EXCHANGE command payload elements before encryption (Tables 8-15 and 8-16, pp. 81-82). */
+namespace Exchange {
+
+/** @brief `0x8C` mailbox option byte: bit0 starts (1) or stops (0) an atomic session. */
+Bytes AtomicSession(bool start);
+
+/** @brief `0x87` read request. */
+Bytes ReadRequest(uint16_t offset, uint16_t length);
+
+/** @brief `0x8A` write request. */
+Bytes WriteRequest(uint16_t offset, const Bytes &data);
+
+/** @brief `0x95` set request: fill `length` bytes at `offset` with `value`. */
+Bytes SetRequest(uint16_t offset, uint16_t length, uint8_t value);
+
+/** @brief `0xBA` mailbox commands wrapping the concatenated `requests`. */
+Bytes MailboxCommands(const Bytes &requests);
+
+/** @brief `0x97` Reader status (Table 8-18, p. 84). */
+Bytes ReaderStatus(uint8_t firstByte, uint8_t secondByte);
+
+} // namespace Exchange
+
+/**
+ * @brief A decrypted EXCHANGE response payload (Table 8-20, p. 86, and
+ * section 8.3.3.5.5, p. 87): big-endian 2-byte length-prefixed blocks, the
+ * last being the status `0x0002 || B1 || B2`.
+ */
+struct ExchangeResponse {
+	std::vector<Bytes> mReadData;
+	uint16_t mStatus{ 0xFFFF };
+};
+
+/** @brief Splits a decrypted EXCHANGE response payload; false if it is not a well-formed block sequence ending in a status block. */
+bool ParseExchangeResponse(const Bytes &plaintext, ExchangeResponse &outResponse);
+
 } // namespace AliroUdTest::Reader

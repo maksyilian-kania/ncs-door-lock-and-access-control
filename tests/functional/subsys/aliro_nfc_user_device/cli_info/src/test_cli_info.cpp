@@ -58,9 +58,20 @@ std::string RunCommand(const char *cmd)
 	return std::string(buf, size);
 }
 
+/* Every case starts from factory state: no open staging transaction and no provisioned credential or mailbox. */
+void ResetBeforeEachTest(void *fixture)
+{
+	ARG_UNUSED(fixture);
+
+	(void)RunCommand("aliro-ud credential abort");
+	const std::string output{ RunCommand("aliro-ud credential reset") };
+	zassert_true(output.find("OK") != std::string::npos, "credential reset should succeed, got: %s",
+		     output.c_str());
+}
+
 } // namespace
 
-ZTEST_SUITE(aliro_ud_cli_info, nullptr, SetupCli, nullptr, nullptr, nullptr);
+ZTEST_SUITE(aliro_ud_cli_info, nullptr, SetupCli, ResetBeforeEachTest, nullptr, nullptr);
 
 /**
  * @brief `aliro-ud info` reports one deterministic "OK ..." line carrying
