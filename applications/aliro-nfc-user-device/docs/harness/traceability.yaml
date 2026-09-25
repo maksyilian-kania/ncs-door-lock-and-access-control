@@ -1,0 +1,830 @@
+# Aliro NFC User Device requirement traceability.
+#
+# Validated by `scripts/validate-traceability.py --required`. Each selected
+# requirement appears exactly once. Paths in `evidence` are relative to this
+# directory or to the repository root.
+#
+# application_status:
+#   planned          a host-verifiable clause is still open, or only target
+#                    acceptance can verify the requirement.
+#   blocked-stack    a precise ncs-aliro defect or missing behavior blocks the
+#                    application path (`stack_gate` names revision and finding).
+#   verified-host    every host-verifiable clause has current host evidence;
+#                    target acceptance remains assigned to C7.
+#   verified-target  verified-host plus physical target evidence.
+#
+# No status claims complete-system, stack, or conformance compliance. Stack
+# ownership is recorded in `stack_gate` and `notes`, separately from the
+# application status.
+
+baseline:
+  audit: C1.4
+  application_source: a02da4f8b924b8835f581970d1b4b492741fe938
+  ncs_aliro: eed34381d7c6ff6f9ad6a06024c5c8170e1db64f
+  toolchain: NCS v3.4.0, native_sim/native/64
+  host_matrix: 12 of 12 configurations, 144 of 144 cases passed
+  phase2_audited: false
+
+requirements:
+
+- requirement: ALIRO-UD-SYRS-P1-001
+  summary: Execute on the nRF54LM20B DK with the PCA64110 antenna.
+  application_slices: [C0.1, C7.2]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  target_assignment: C7.2 physical DK and antenna run.
+  stack_gate: none
+  evidence:
+    - evidence/C0.1.md
+  notes: Target-only. C0.1 records a successful DK build; that is inspection, not execution evidence.
+
+- requirement: ALIRO-UD-SYRS-P1-002
+  summary: NFC-A Type 4 Tag Platform with ISO-DEP in listen mode.
+  application_slices: [C1.1, C1.3, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - worker_lifecycle (12 cases, fake NFC transport, real worker and stack)
+      - apdu_fragment_assembler (7 cases)
+      - os_timer (6 cases)
+    target: []
+  target_assignment: C7.2 RF listen-mode operation with a physical Reader.
+  stack_gate: none
+  evidence:
+    - evidence/C1.1.md
+    - evidence/C1.3.md
+    - tests/functional/subsys/aliro_nfc_user_device/worker_lifecycle/src/test_worker_lifecycle.cpp
+  notes: Host covers the application transport and lifecycle; NFC-A/ISO-DEP RF behavior is in nfc_t4t_lib and needs the target.
+
+- requirement: ALIRO-UD-SYRS-P1-003
+  summary: Line-oriented development CLI over the DK virtual UART at 115200 8N1.
+  application_slices: [C1.3, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - cli_info (7 cases, native shell dummy backend)
+    target: []
+  target_assignment: C7.2 CLI over the DK virtual COM port, including 115200 8N1 inspection.
+  stack_gate: none
+  evidence:
+    - evidence/C1.3.md
+    - tests/functional/subsys/aliro_nfc_user_device/cli_info/src/test_cli_info.cpp
+
+- requirement: ALIRO-UD-SYRS-P1-004
+  summary: CLI provisions key, bindings, trust, policy, timestamps, mailbox configuration, and optional documents.
+  application_slices: [C1.2, C3.2, C7.2]
+  application_status: planned
+  verification:
+    host:
+      - cli_info.test_credential_staging_transaction_commits
+      - cli_info.test_mailbox_data_subset_staging_and_inspect
+    target: []
+  target_assignment: C7.2 provisioning a clean DK through the CLI.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+    - tests/functional/subsys/aliro_nfc_user_device/cli_info/src/test_cli_info.cpp
+  notes: Open host clause is Access/Revocation Document provisioning (C3.2).
+
+- requirement: ALIRO-UD-SYRS-P1-005
+  summary: CLI create, update, inspect, delete, and factory reset with deterministic results.
+  application_slices: [C1.3, C2.2, C3.2, C7.2]
+  application_status: planned
+  verification:
+    host:
+      - cli_info.test_credential_staging_transaction_commits
+      - cli_info.test_mailbox_inspect_init_read_and_erase_on_delete
+    target: []
+  target_assignment: C7.2 delete and factory reset on the DK.
+  stack_gate: none
+  evidence:
+    - evidence/C0.1.md
+    - evidence/C1.4.md
+  notes: Open application gap (C0.1 item 1). Mailbox erase on credential delete/reset is owned by C3.2; the discarded Kpersistent cleanup result is owned by C2.2. See evidence/C1.4.md.
+
+- requirement: ALIRO-UD-SYRS-P1-006
+  summary: Reject malformed or inconsistent provisioning input without changing committed state.
+  application_slices: [C3.2, C7.2]
+  application_status: planned
+  verification:
+    host:
+      - cli_info.test_credential_setters_require_open_transaction
+    target: []
+  target_assignment: C7.2 CLI rejection on the DK.
+  stack_gate: none
+  evidence:
+    - tests/functional/subsys/aliro_nfc_user_device/cli_info/src/test_cli_info.cpp
+  notes: Host rejection and failure-atomicity coverage is owned by C3.2.
+
+- requirement: ALIRO-UD-SYRS-P1-007
+  summary: Retain credentials, trust, policies, documents, mailbox, and Kpersistent across reset and power loss.
+  application_slices: [C2.1, C2.2, C2.3, C3.1, C7.1]
+  application_status: planned
+  verification:
+    host:
+      - mailbox (store reboot simulation and fault-injection cases)
+    target: []
+  target_assignment: C7.1 reset and actual power-loss qualification.
+  stack_gate: none
+  evidence:
+    - tests/functional/subsys/aliro_nfc_user_device/mailbox/src/test_mailbox_store.cpp
+    - tests/functional/subsys/aliro_nfc_user_device/mailbox/src/test_mailbox_fault_injection.cpp
+  notes: Kpersistent recovery is C2.1-C2.3; document persistence is C3.1.
+
+- requirement: ALIRO-UD-SYRS-P1-008
+  summary: No export of the credential private key, Kpersistent, or session keys via CLI, NFC, logs, or diagnostics.
+  application_slices: [C2.1, C2.2, C2.3, C7.1, C7.4]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  target_assignment: C7.1 non-exportability on target; C7.4 log and artifact audit.
+  stack_gate: none
+  evidence:
+    - evidence/C1.4.md
+  notes: No current host test asserts non-exportability. Kpersistent handle ownership is C2.1-C2.3.
+
+- requirement: ALIRO-UD-SYRS-P1-009
+  summary: At least 16 reader_group_identifier bindings per Access Credential.
+  application_slices: [C7.2]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  target_assignment: C7.2 NFC_UD_STANDARD_SIXTEEN_GROUPPIDENTIFIER_ONE_AC.
+  stack_gate: none
+  evidence:
+    - evidence/C1.4.md
+  notes: Host gap without an owning host slice; see evidence/C1.4.md.
+
+- requirement: ALIRO-UD-SYRS-P1-010
+  summary: CLI method to select each Access Credential sharing a reader identifier.
+  application_slices: [C7.2]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  target_assignment: C7.2 demonstration with two credentials sharing a reader_group_identifier.
+  stack_gate: none
+  evidence:
+    - evidence/C1.4.md
+  notes: Host gap without an owning host slice; see evidence/C1.4.md.
+
+- requirement: ALIRO-UD-SYRS-P1-011
+  summary: DK button press opens a configurable 1-300 s authorization window, default 30 s.
+  application_slices: [C1.2, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - authorization (window boundary, contract, and AUTH0 end-to-end cases)
+    target: []
+  target_assignment: C7.2 physical button demonstration.
+  stack_gate: none
+  evidence:
+    - tests/functional/subsys/aliro_nfc_user_device/authorization/src/test_authorization_window.cpp
+
+- requirement: ALIRO-UD-SYRS-P1-012
+  summary: Visible indication when user authentication is required without a valid window.
+  application_slices: [C1.2, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - authorization_contract.test_notify_authentication_required_activates_indicator
+      - standard_integration.test_force_user_authentication_requires_window
+    target: []
+  target_assignment: C7.2 LED demonstration during a Reader transaction.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+
+- requirement: ALIRO-UD-SYRS-P1-013
+  summary: SELECT of the expedited AID returns a conforming FCI.
+  application_slices: [C1.1, C1.2, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - worker_lifecycle.test_select_expedited_aid_returns_spec_fci
+      - standard_integration (SELECT in every flow)
+    target: []
+  target_assignment: C7.2 SELECT routine with a physical Reader.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+    - tests/functional/subsys/aliro_nfc_user_device/worker_lifecycle/src/test_worker_lifecycle.cpp
+  notes: FCI encoding is stack-owned.
+
+- requirement: ALIRO-UD-SYRS-P1-014
+  summary: ISO/IEC 7816-4 APDU encoding with Aliro CLA/INS/P1/P2/Lc/Le/SW/TLV rules.
+  application_slices: [C1.2, C1.3, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - standard_integration.test_reader_matches_spec_example_transcript
+      - standard_integration (all flows parsed by the independent test Reader)
+      - exchange_lifecycle.test_rejected_auth_commands_end_transaction
+    target: []
+  target_assignment: C7.2 NFC_UD_STANDARD_NO_CERT and negative command tests.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+    - evidence/C1.3.md
+  notes: APDU/TLV encoding is stack-owned; host evidence is through the application transport.
+
+- requirement: ALIRO-UD-SYRS-P1-015
+  summary: Command chaining for AUTH0 responses and LOAD CERT, AUTH1, and EXCHANGE commands.
+  application_slices: [C7.2]
+  application_status: planned
+  verification:
+    host:
+      - apdu_fragment_assembler (ISO-DEP fragment reassembly only)
+    target: []
+  target_assignment: C7.2 NFC_UD_AUTH0_RESPONSE_CHAINING, NFC_UD_STANDARD_CERT_IN_LOAD_CERT_WITH_CHAINING, NFC_UD_STANDARD_CERT_IN_AUTH1_WITH_CHAINING, NFC_UD_EXCHANGE_WITH_CHAINING.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+    - evidence/C1.3.md
+  notes: Aliro chaining is stack-owned and not exercised on host (commands fit short APDUs). No stack defect is known.
+
+- requirement: ALIRO-UD-SYRS-P1-016
+  summary: Accept unknown extension TLVs where forward-compatible processing is required.
+  application_slices: [C7.2]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  target_assignment: C7.2 NFC_UD_NEG_AUTH0_EXTRA_TAG, NFC_UD_NEG_AUTH1_EXTRA_TAG, NFC_UD_NEG_EXCHANGE_WITH_EXTRA_TAG.
+  stack_gate: none
+  evidence:
+    - evidence/C1.3.md
+  notes: TLV parsing is stack-owned; no host case injects extra tags. No stack defect is known.
+
+- requirement: ALIRO-UD-SYRS-P1-017
+  summary: Complete Expedited Standard flow through EXCHANGE and result handling.
+  application_slices: [C1.2, C1.3, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - standard_integration (no-cert, LOAD CERT, and AUTH1-certificate flows)
+      - exchange_lifecycle.test_read_then_final_success_status_ends_transaction
+    target: []
+  target_assignment: C7.2 NFC_UD_STANDARD_NO_CERT and certificate-flow tests.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+    - evidence/C1.3.md
+
+- requirement: ALIRO-UD-SYRS-P1-018
+  summary: New random P-256 ephemeral key pair for each AUTH0 response.
+  application_slices: [C1.2, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - standard_integration.test_auth0_ephemeral_key_is_fresh_per_transaction
+      - authorization_e2e.test_auth0_response_is_independent_of_window_state
+    target: []
+  target_assignment: C7.2 NFC_UD_STANDARD_NO_CERT.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+
+- requirement: ALIRO-UD-SYRS-P1-019
+  summary: Select the credential and trust material by AUTH0 reader_group_identifier.
+  application_slices: [C1.2, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - standard_integration.test_credential_and_trust_follow_reader_group_identifier
+    target: []
+  target_assignment: C7.2 NFC_UD_STANDARD_NO_CERT and NFC_UD_NEG_AUTH0_UNKNOWN_READER_ID.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+
+- requirement: ALIRO-UD-SYRS-P1-020
+  summary: Enforce authentication_policy 0x01, 0x02, and 0x03.
+  application_slices: [C1.2, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - standard_integration.test_user_device_setting_policies_proceed_without_window
+      - standard_integration.test_force_user_authentication_requires_window
+      - standard_integration.test_credential_force_policy_requires_window
+    target: []
+  target_assignment: C7.2 NFC_UD_STANDARD_NO_CERT.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+  notes: Policy combination is stack-owned; the application supplies the window state.
+
+- requirement: ALIRO-UD-SYRS-P1-021
+  summary: Policy 0x03 continues only with a valid button authorization window.
+  application_slices: [C1.2, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - standard_integration.test_force_user_authentication_requires_window
+      - standard_integration.test_credential_force_policy_requires_window
+      - authorization_e2e.test_auth0_policy_0x03_with_open_window_does_not_indicate
+    target: []
+  target_assignment: C7.2 physical button during a Reader transaction.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+
+- requirement: ALIRO-UD-SYRS-P1-022
+  summary: No-certificate Reader authentication via AUTH1 signature and bound reader_PubK.
+  application_slices: [C1.2, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - standard_integration.test_no_cert_flow_returns_credential_public_key
+      - standard_integration.test_wrong_signature_is_indistinguishable_from_unknown_group
+    target: []
+  target_assignment: C7.2 NFC_UD_NEG_AUTH1_WRONG_READER_SIGNATURE.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+
+- requirement: ALIRO-UD-SYRS-P1-023
+  summary: Certificate Reader authentication only after issuer-CA verification.
+  application_slices: [C1.2, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - standard_integration.test_certificate_in_load_cert_authenticates_reader
+      - standard_integration.test_certificate_in_auth1_authenticates_reader
+      - certificate (5 cases)
+    target: []
+  target_assignment: C7.2 certificate tests with chaining.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+
+- requirement: ALIRO-UD-SYRS-P1-024
+  summary: Reject invalid, incorrectly signed, or untrusted certificates without disclosing trust material.
+  application_slices: [C1.2, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - standard_integration.test_untrusted_certificate_is_rejected_without_disclosing_trust
+      - certificate.test_validate_rejects_tampered_signature
+      - certificate.test_validate_rejects_truncated_certificate
+    target: []
+  target_assignment: C7.2 NFC_UD_NEG_STANDARD_CERT_IN_LOAD_CERT_WITH_CHAINING_INCORRECT_SIGNATURE and _INCORRECT_FORMAT.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+
+- requirement: ALIRO-UD-SYRS-P1-025
+  summary: Derive Kdh, ExpeditedSKReader, ExpeditedSKDevice, and StepUpSK with ECKA-DH and HKDF (0x5E).
+  application_slices: [C1.2, C5.2, C7.2]
+  application_status: planned
+  verification:
+    host:
+      - standard_integration.test_reader_matches_spec_example_transcript
+      - standard_integration (AUTH1 decrypts under independently derived ExpeditedSKDevice)
+      - crypto.test_appendix_14_3_hkdf_and_output_slices
+    target: []
+  target_assignment: C7.2 NFC_UD_STANDARD_NO_CERT.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+  notes: StepUpSK is not observable before Step-Up; it is verified through SessionData in C5.2. KDF construction is stack-owned.
+
+- requirement: ALIRO-UD-SYRS-P1-026
+  summary: AES-GCM protection of AUTH1 and EXCHANGE responses with direction keys and counters.
+  application_slices: [C1.2, C1.3, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - standard_integration (AUTH1 response with device counter 1)
+      - exchange_lifecycle (EXCHANGE responses under ExpeditedSKDevice)
+      - crypto.test_appendix_and_reference_directional_aes_gcm_vectors
+    target: []
+  target_assignment: C7.2 EXCHANGE tests, including chained EXCHANGE.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+    - evidence/C1.3.md
+
+- requirement: ALIRO-UD-SYRS-P1-027
+  summary: 64-byte ECDSA P-256 User Device signature over the exact AUTH1 fields.
+  application_slices: [C1.2, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - standard_integration (signature verified over the authentication data, usage 0x4E887B4C)
+      - credential_signing (3 cases)
+    target: []
+  target_assignment: C7.2 NFC_UD_STANDARD_NO_CERT and certificate-flow tests.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+
+- requirement: ALIRO-UD-SYRS-P1-028
+  summary: Return the credential public key or key_slot per the AUTH1 parameter.
+  application_slices: [C1.2, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - standard_integration.test_no_cert_flow_returns_credential_public_key
+      - standard_integration.test_no_cert_flow_returns_key_slot
+    target: []
+  target_assignment: C7.2 NFC_UD_STANDARD_NO_CERT.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+
+- requirement: ALIRO-UD-SYRS-P1-029
+  summary: Accurate signaling_bitmap for documents, mailbox state and rights, and EXCHANGE capabilities.
+  application_slices: [C1.2, C1.3, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - standard_integration.test_auth1_reports_documents_mailbox_rights_and_timestamps
+      - exchange_lifecycle (bitmap matches the rights EXCHANGE enforces)
+    target: []
+  target_assignment: C7.2 AUTH1 routine and EXCHANGE tests.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+    - evidence/C1.3.md
+
+- requirement: ALIRO-UD-SYRS-P1-030
+  summary: credential_signed_timestamp and revocation_signed_timestamp in AUTH1 when provisioned.
+  application_slices: [C1.2, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - standard_integration.test_auth1_reports_documents_mailbox_rights_and_timestamps
+    target: []
+  target_assignment: C7.2 AUTH1 routine.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+
+- requirement: ALIRO-UD-SYRS-P1-031
+  summary: AUTH0/AUTH1 observable data independent of credential, reader key, or Kpersistent existence.
+  application_slices: [C1.2, C4.3, C7.2]
+  application_status: planned
+  verification:
+    host:
+      - standard_integration.test_wrong_signature_is_indistinguishable_from_unknown_group
+      - authorization_e2e.test_auth0_response_is_independent_of_window_state
+    target: []
+  target_assignment: C7.2 NFC_UD_NEG_AUTH0_UNKNOWN_READER_ID.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+    - evidence/C1.4.md
+  notes: Credential and reader-key clauses are host-verified. The Kpersistent clause is observable only in a Fast-requesting AUTH0 and is verified with P2-005 in C4.3; see evidence/C1.4.md.
+
+- requirement: ALIRO-UD-SYRS-P1-032
+  summary: Persistent per-credential mailbox with provisionable size, permissions, and AUTH1 subset.
+  application_slices: [C1.3, C7.1, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - mailbox (28 cases)
+      - cli_info.test_mailbox_data_subset_staging_and_inspect
+      - exchange_lifecycle (reads and writes against provisioned rights)
+    target: []
+  target_assignment: C7.1 mailbox persistence on target; C7.2 NFC_UD_EXCHANGE_READ_REQUEST and _WRITE_REQUEST.
+  stack_gate: none
+  evidence:
+    - evidence/C1.3.md
+
+- requirement: ALIRO-UD-SYRS-P1-033
+  summary: Authorized mailbox read, write, and set at Reader-selected offsets through EXCHANGE.
+  application_slices: [C1.3, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - exchange_lifecycle.test_read_then_final_success_status_ends_transaction
+      - exchange_lifecycle.test_write_and_set_commit_within_one_command
+      - exchange_lifecycle.test_unauthorized_write_fails_and_destroys_session_keys
+      - exchange_lifecycle.test_unauthorized_read_fails
+    target: []
+  target_assignment: C7.2 NFC_UD_EXCHANGE_READ_REQUEST, _WRITE_REQUEST, _SET_REQUEST.
+  stack_gate: none
+  evidence:
+    - evidence/C1.3.md
+
+- requirement: ALIRO-UD-SYRS-P1-034
+  summary: Atomic commit of write/set per EXCHANGE; preserve pre-session data until the atomic session closes.
+  application_slices: [C1.3, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - exchange_lifecycle.test_write_and_set_commit_within_one_command
+      - exchange_lifecycle.test_atomic_session_commits_only_when_closed
+      - exchange_lifecycle.test_field_loss_during_atomic_session_discards_staged_changes
+      - exchange_lifecycle.test_session_timeout_during_atomic_session_recovers
+    target: []
+  target_assignment: C7.2 NFC_UD_EXCHANGE_WRITE_REQUEST and _SET_REQUEST.
+  stack_gate: none
+  evidence:
+    - evidence/C1.3.md
+
+- requirement: ALIRO-UD-SYRS-P1-035
+  summary: Secure-channel error sequence for unauthorized, out-of-bounds, malformed, or failed EXCHANGE.
+  application_slices: [C1.3, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - exchange_lifecycle.test_out_of_bounds_request_fails_without_partial_commit
+      - exchange_lifecycle.test_unauthorized_write_fails_and_destroys_session_keys
+      - exchange_lifecycle.test_wrong_length_request_fails
+    target: []
+  target_assignment: C7.2 NFC_UD_NEG_EXCHANGE_MAILBOX_OUT_OF_BOUNDS and _WITH_WRONG_LENGTH.
+  stack_gate: none
+  evidence:
+    - evidence/C1.3.md
+  notes: Error sequencing is stack-owned. The extra-tag EXCHANGE variant is tracked under P1-016.
+
+- requirement: ALIRO-UD-SYRS-P1-036
+  summary: Secure-channel success sequence only after every EXCHANGE request succeeds.
+  application_slices: [C1.3, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - exchange_lifecycle.test_read_then_final_success_status_ends_transaction
+      - exchange_lifecycle.test_unauthenticated_exchange_runs_failure_process
+    target: []
+  target_assignment: C7.2 NFC_UD_EXCHANGE positive tests.
+  stack_gate: none
+  evidence:
+    - evidence/C1.3.md
+
+- requirement: ALIRO-UD-SYRS-P1-037
+  summary: Process the final Reader status or CONTROL FLOW failure and terminate the transaction.
+  application_slices: [C1.3, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - exchange_lifecycle.test_read_then_final_success_status_ends_transaction
+      - exchange_lifecycle.test_final_reader_failure_status_ends_transaction
+      - exchange_lifecycle.test_control_flow_after_auth1_failure_ends_transaction
+    target: []
+  target_assignment: C7.2 EXCHANGE and CONTROL FLOW routines.
+  stack_gate: none
+  evidence:
+    - evidence/C1.3.md
+
+- requirement: ALIRO-UD-SYRS-P1-038
+  summary: On failure return empty data and an error status, destroy session-bound data, and terminate.
+  application_slices: [C1.2, C1.3, C7.2]
+  application_status: verified-host
+  verification:
+    host:
+      - exchange_lifecycle.test_unauthorized_write_fails_and_destroys_session_keys
+      - exchange_lifecycle.test_unauthenticated_exchange_runs_failure_process
+      - exchange_lifecycle.test_rejected_auth_commands_end_transaction
+      - standard_integration.test_untrusted_certificate_is_rejected_without_disclosing_trust
+    target: []
+  target_assignment: C7.2 NFC_UD_NEG tests.
+  stack_gate: none
+  evidence:
+    - evidence/C1.2.md
+    - evidence/C1.3.md
+  notes: The failure process is stack-owned; key destruction is observed as rejection of later EXCHANGE.
+
+- requirement: ALIRO-UD-SYRS-P1-039
+  summary: Reject malformed, unsupported-version, wrong-P1/P2, out-of-sequence, or incomplete-chained AUTH0/AUTH1.
+  application_slices: [C1.3, C7.2]
+  application_status: planned
+  verification:
+    host:
+      - exchange_lifecycle.test_rejected_auth_commands_end_transaction
+    target: []
+  target_assignment: C7.2 NFC_UD_NEG_AUTH0_WRONG_VALUE, NFC_UD_NEG_AUTH1_WRONG_VALUE, NFC_UD_NEG_AUTH0_CHAINING_NOT_COMPLETED, NFC_UD_NEG_AUTH1_CHAINING_NOT_COMPLTED.
+  stack_gate: none
+  evidence:
+    - evidence/C1.3.md
+  notes: Host covers wrong P1/P2, unsupported version, and out-of-sequence. Wrong-value and incomplete-chaining variants are stack-owned validation and are deferred to C7.2. No stack defect is known.
+
+- requirement: ALIRO-UD-SYRS-P1-040
+  summary: Meet every NFC and processing-time bound applicable to the selected PICS on the DK.
+  application_slices: [C7.2]
+  application_status: planned
+  verification:
+    host:
+      - command_timing and command_timing_disabled (instrumentation only)
+    target: []
+  target_assignment: C7.2 on-target timing measurement against any applicable Test Plan bound.
+  stack_gate: none
+  evidence:
+    - evidence/C1.4.md
+  notes: No numeric User Device NFC bound was located in the Test Plan; see evidence/C1.4.md.
+
+- requirement: ALIRO-UD-SYRS-P2-001
+  summary: Expedited Fast after a prior Standard phase established Kpersistent.
+  application_slices: [C4.1, C4.2, C7.2]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4.
+
+- requirement: ALIRO-UD-SYRS-P2-002
+  summary: Derive and persist the 32-byte Kpersistent and reader_group_sub_identifier.
+  application_slices: [C2.1, C2.2, C2.3, C4.1, C4.2, C7.1, C7.2]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4.
+
+- requirement: ALIRO-UD-SYRS-P2-003
+  summary: Fast-phase derivation of CryptogramSK and ExpeditedSK keys.
+  application_slices: [C4.1, C4.2, C7.2]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4.
+
+- requirement: ALIRO-UD-SYRS-P2-004
+  summary: Return the authenticated cryptogram in a matching Fast AUTH0 response.
+  application_slices: [C4.2, C7.2]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4.
+
+- requirement: ALIRO-UD-SYRS-P2-005
+  summary: Non-disclosing cryptogram without matching Kpersistent.
+  application_slices: [C4.3, C7.2]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4. Also closes the Kpersistent clause of P1-031.
+
+- requirement: ALIRO-UD-SYRS-P2-006
+  summary: Different cryptograms for consecutive Fast requests lacking matching state.
+  application_slices: [C4.3, C7.2]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4.
+
+- requirement: ALIRO-UD-SYRS-P2-007
+  summary: Fast EXCHANGE with the same mailbox and result semantics as Standard.
+  application_slices: [C4.4, C7.2]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4.
+
+- requirement: ALIRO-UD-SYRS-P2-008
+  summary: Continue from attempted Fast into Standard in the same NFC transaction.
+  application_slices: [C4.3, C7.2]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4.
+
+- requirement: ALIRO-UD-SYRS-P2-020
+  summary: Step-Up after successful Standard in the same NFC session.
+  application_slices: [C5.2, C5.3, C6.1, C7.3]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4. The harness README stack gate is assessed by C6.1.
+
+- requirement: ALIRO-UD-SYRS-P2-021
+  summary: Store and retrieve an Access Document.
+  application_slices: [C3.1, C3.2, C5.1, C6.1, C7.1, C7.3]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4.
+
+- requirement: ALIRO-UD-SYRS-P2-022
+  summary: Store and retrieve a Revocation Document.
+  application_slices: [C3.1, C3.2, C6.1, C6.2, C7.1, C7.3]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4. The harness README stack gate is assessed by C6.1.
+
+- requirement: ALIRO-UD-SYRS-P2-023
+  summary: Signal retrievable Access and Revocation Documents in the AUTH1 signaling_bitmap.
+  application_slices: [C6.1, C6.2, C6.3, C7.3]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4. The harness README stack gate is assessed by C6.1.
+
+- requirement: ALIRO-UD-SYRS-P2-024
+  summary: Parse DeviceRequest document types, namespaces, and element identifiers.
+  application_slices: [C5.2, C6.1, C6.3, C7.3]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4.
+
+- requirement: ALIRO-UD-SYRS-P2-025
+  summary: Return the requested Access Document, Revocation Document, or both in a DeviceResponse.
+  application_slices: [C5.2, C6.1, C6.2, C6.3, C7.3]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4. The harness README stack gate is assessed by C6.1.
+
+- requirement: ALIRO-UD-SYRS-P2-026
+  summary: Omit the DeviceResponse document field when no data elements are returned.
+  application_slices: [C5.2, C6.1, C6.3, C7.3]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4.
+
+- requirement: ALIRO-UD-SYRS-P2-027
+  summary: Deterministic CBOR encoding of Aliro structures.
+  application_slices: [C5.2, C6.1, C6.3, C7.3]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4. The harness README stack gate is assessed by C6.1.
+
+- requirement: ALIRO-UD-SYRS-P2-028
+  summary: DocType and NameSpace aliro-a and aliro-r.
+  application_slices: [C5.2, C6.1, C6.3, C7.3]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4.
+
+- requirement: ALIRO-UD-SYRS-P2-029
+  summary: SessionData encapsulation protected with StepUpSK-derived keys and counters.
+  application_slices: [C5.2, C6.1, C6.3, C7.3]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4. Also closes the StepUpSK clause of P1-025.
+
+- requirement: ALIRO-UD-SYRS-P2-030
+  summary: SessionData over ENVELOPE and GET RESPONSE as required by response size.
+  application_slices: [C5.2, C6.1, C6.3, C7.3]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4.
+
+- requirement: ALIRO-UD-SYRS-P2-031
+  summary: Post-Step-Up EXCHANGE responses protected with StepUpSKDevice and its counter.
+  application_slices: [C5.3, C6.1, C7.3]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4.
+
+- requirement: ALIRO-UD-SYRS-P2-032
+  summary: Failure process for any Step-Up session-encryption, APDU, request, or response error.
+  application_slices: [C5.3, C6.1, C6.3, C7.3]
+  application_status: planned
+  verification:
+    host: []
+    target: []
+  stack_gate: none
+  notes: Not audited in C1.4. The harness README stack gate is assessed by C6.1.
