@@ -12,5 +12,9 @@ mainmenu "Aliro NFC User Device - Mailbox Test"
 # lives in the credential record; see CMakeLists.txt).
 rsource "../../../../../applications/aliro-nfc-user-device/src/storage/mailbox/Kconfig"
 rsource "../../../../../applications/aliro-nfc-user-device/src/storage/credential/Kconfig"
+# The PersistentKey store and crypto.cpp sources this test builds (see
+# CMakeLists.txt) reference their own Kconfig options.
+rsource "../../../../../applications/aliro-nfc-user-device/src/storage/key/Kconfig"
+rsource "../../../../../applications/aliro-nfc-user-device/src/platform/crypto/Kconfig"
 
 source "Kconfig.zephyr"

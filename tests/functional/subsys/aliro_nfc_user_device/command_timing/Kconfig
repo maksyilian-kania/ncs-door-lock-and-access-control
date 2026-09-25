@@ -22,5 +22,9 @@ rsource "../../../../../applications/aliro-nfc-user-device/src/storage/credentia
 # Aliro::Interface::UserDevice::Mailbox::*, so this test now also builds
 # storage/mailbox/*.cpp (see CMakeLists.txt) and needs its Kconfig options.
 rsource "../../../../../applications/aliro-nfc-user-device/src/storage/mailbox/Kconfig"
+# The Document and PersistentKey sources this test builds (see
+# CMakeLists.txt) reference their own Kconfig options.
+rsource "../../../../../applications/aliro-nfc-user-device/src/storage/key/Kconfig"
+rsource "../../../../../applications/aliro-nfc-user-device/src/storage/document/Kconfig"
 
 source "Kconfig.zephyr"

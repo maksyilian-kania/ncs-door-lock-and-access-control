@@ -29,6 +29,13 @@ target_sources(app PRIVATE
   ${ALIRO_UD_APP_SRC_DIR}/storage/credential/credential_store.cpp
   ${ALIRO_UD_TEST_COMMON_DIR}/fake_credential_persistence.cpp
   ${ALIRO_UD_TEST_COMMON_DIR}/fake_key_backend.cpp
+  # credential_store.cpp cascades credential deletion to the Kpersistent
+  # record store, whose key backend fake resolves keys through crypto.cpp.
+  ${ALIRO_UD_APP_SRC_DIR}/storage/key/persistent_key_store.cpp
+  ${ALIRO_UD_TEST_COMMON_DIR}/fake_persistent_key_persistence.cpp
+  ${ALIRO_UD_TEST_COMMON_DIR}/fake_persistent_key_backend.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/platform/crypto/crypto.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/platform/crypto/certificate.cpp
   src/test_mailbox_store.cpp
   src/test_mailbox_sessions.cpp
   src/test_mailbox_fault_injection.cpp

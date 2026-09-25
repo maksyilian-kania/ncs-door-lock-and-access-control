@@ -15,5 +15,8 @@ rsource "../../../../../applications/aliro-nfc-user-device/src/platform/os/Kconf
 rsource "../../../../../applications/aliro-nfc-user-device/src/platform/authorization/Kconfig"
 rsource "../../../../../applications/aliro-nfc-user-device/src/storage/credential/Kconfig"
 rsource "../../../../../applications/aliro-nfc-user-device/src/storage/mailbox/Kconfig"
+rsource "../../../../../applications/aliro-nfc-user-device/src/platform/crypto/Kconfig"
+rsource "../../../../../applications/aliro-nfc-user-device/src/storage/key/Kconfig"
+rsource "../../../../../applications/aliro-nfc-user-device/src/storage/document/Kconfig"
 
 source "Kconfig.zephyr"

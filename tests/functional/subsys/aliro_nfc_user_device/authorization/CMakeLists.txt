@@ -39,6 +39,18 @@ target_sources(app PRIVATE
   ${ALIRO_UD_APP_SRC_DIR}/storage/credential/credential_store.cpp
   ${ALIRO_UD_TEST_COMMON_DIR}/fake_credential_persistence.cpp
   ${ALIRO_UD_TEST_COMMON_DIR}/fake_key_backend.cpp
+  # The real Aliro::UserDeviceStack references the Crypto,
+  # CredentialSigning, Document, and PersistentKey contracts; the
+  # PersistentKey persistence/key backends are swapped for in-memory fakes.
+  ${ALIRO_UD_APP_SRC_DIR}/platform/crypto/crypto.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/platform/crypto/certificate.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/platform/crypto/credential_signing.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/storage/document/document.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/storage/document/document_snapshots.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/storage/key/persistent_key.cpp
+  ${ALIRO_UD_APP_SRC_DIR}/storage/key/persistent_key_store.cpp
+  ${ALIRO_UD_TEST_COMMON_DIR}/fake_persistent_key_persistence.cpp
+  ${ALIRO_UD_TEST_COMMON_DIR}/fake_persistent_key_backend.cpp
   # WP7 stack impact (see docs/wp7_stack_impact.md): the real
   # Aliro::UserDeviceStack now unconditionally calls
   # Aliro::Interface::UserDevice::Mailbox::* from
