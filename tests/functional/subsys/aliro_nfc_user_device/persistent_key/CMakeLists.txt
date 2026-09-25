@@ -33,5 +33,6 @@ target_sources(app PRIVATE
   src/recovery_support.cpp
   src/test_persistent_key_semantics.cpp
   src/test_persistent_key_recovery.cpp
+  src/test_persistent_key_fault_injection.cpp
   src/test_persistent_key_credential_cascade.cpp
 )

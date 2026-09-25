@@ -33,6 +33,7 @@ std::array<Object, 2 * kMaxRecords + 64> sObjects{};
 CryptoTypes::KeyId sNextInputKeyId{ kInputKeyIdBase + 1 };
 CryptoTypes::KeyId sNextTemporaryKeyId{ kTemporaryKeyIdBase + 1 };
 Fault sArmedFault{ Fault::None };
+size_t sArmedSkip{ 0 };
 size_t sDurableDestroyCount{ 0 };
 size_t sDurableCreateCount{ 0 };
 size_t sInvalidDestroyCount{ 0 };
@@ -63,6 +64,10 @@ bool ConsumeFault(Fault fault)
 	if (sArmedFault != fault) {
 		return false;
 	}
+	if (sArmedSkip > 0) {
+		--sArmedSkip;
+		return false;
+	}
 	sArmedFault = Fault::None;
 	return true;
 }
@@ -83,6 +88,7 @@ void Reset()
 	sNextInputKeyId = kInputKeyIdBase + 1;
 	sNextTemporaryKeyId = kTemporaryKeyIdBase + 1;
 	sArmedFault = Fault::None;
+	sArmedSkip = 0;
 	sDurableDestroyCount = 0;
 	sDurableCreateCount = 0;
 	sInvalidDestroyCount = 0;
@@ -96,11 +102,18 @@ void Reboot()
 		}
 	}
 	sArmedFault = Fault::None;
+	sArmedSkip = 0;
 }
 
-void FailNext(Fault fault)
+void FailNext(Fault fault, size_t skip)
 {
 	sArmedFault = fault;
+	sArmedSkip = skip;
+}
+
+bool FaultArmed()
+{
+	return sArmedFault != Fault::None;
 }
 
 CryptoTypes::KeyId CreateInputKey(const Material &material)
@@ -192,7 +205,12 @@ AliroError DurablyOwn(CryptoTypes::KeyId sourceKeyId, CryptoTypes::KeyId desired
 		return ALIRO_KEY_ALREADY_EXISTS;
 	}
 
-	if (ConsumeFault(Fault::DurablyOwn) || !FakePower::AllowDurableWrite()) {
+	if (ConsumeFault(Fault::DurablyOwn)) {
+		return ALIRO_ERROR_INTERNAL;
+	}
+	const FakePower::Outcome outcome =
+		FakePower::NextDurableWrite(FakePower::Mutation::OwnKey, desiredPersistentKeyId);
+	if (outcome == FakePower::Outcome::Refuse) {
 		return ALIRO_ERROR_INTERNAL;
 	}
 
@@ -200,6 +218,11 @@ AliroError DurablyOwn(CryptoTypes::KeyId sourceKeyId, CryptoTypes::KeyId desired
 		return ALIRO_NO_MEMORY;
 	}
 	++sDurableCreateCount;
+
+	/* Beyond the backend contract: the key exists although the call failed. */
+	if (outcome == FakePower::Outcome::LandThenFail) {
+		return ALIRO_ERROR_INTERNAL;
+	}
 
 	outActualPersistentKeyId = desiredPersistentKeyId;
 	return ALIRO_NO_ERROR;
@@ -249,13 +272,17 @@ AliroError Destroy(CryptoTypes::KeyId persistedKeyId)
 		return ALIRO_NO_ERROR;
 	}
 
-	if (ConsumeFault(Fault::Destroy) || !FakePower::AllowDurableWrite()) {
+	if (ConsumeFault(Fault::Destroy)) {
+		return ALIRO_ERROR_INTERNAL;
+	}
+	const FakePower::Outcome outcome = FakePower::NextDurableWrite(FakePower::Mutation::DestroyKey, persistedKeyId);
+	if (outcome == FakePower::Outcome::Refuse) {
 		return ALIRO_ERROR_INTERNAL;
 	}
 
 	Release(*durable);
 	++sDurableDestroyCount;
-	return ALIRO_NO_ERROR;
+	return outcome == FakePower::Outcome::LandThenFail ? ALIRO_ERROR_INTERNAL : ALIRO_NO_ERROR;
 }
 
 } // namespace AliroUd::PersistentKey::Backend

@@ -129,6 +129,7 @@ requirements:
       - mailbox (store reboot simulation and fault-injection cases)
       - persistent_key (C2.1 record semantics, including reload of committed records)
       - persistent_key (C2.2 simulated power loss at every durable step and boot recovery)
+      - persistent_key (C2.3 failure before and after every durable transition, read faults, double boot)
     target: []
   target_assignment: C7.1 reset and actual power-loss qualification.
   stack_gate: none
@@ -137,7 +138,8 @@ requirements:
     - tests/functional/subsys/aliro_nfc_user_device/mailbox/src/test_mailbox_fault_injection.cpp
     - evidence/C2.1.md
     - evidence/C2.2.md
-  notes: C2.1 covers Kpersistent record semantics and C2.2 its crash-safe recovery on host; the C2.3 fault matrix remains. Document persistence is C3.1.
+    - evidence/C2.3.md
+  notes: C2.1 covers Kpersistent record semantics, C2.2 its crash-safe recovery, and C2.3 its fault matrix on host. Document persistence is C3.1.
 
 - requirement: ALIRO-UD-SYRS-P1-008
   summary: No export of the credential private key, Kpersistent, or session keys via CLI, NFC, logs, or diagnostics.
@@ -147,6 +149,7 @@ requirements:
     host:
       - persistent_key (no Kpersistent bytes in persisted records; PSA handle ownership)
       - persistent_key (C2.2 no unowned Kpersistent PSA object after recovery)
+      - persistent_key (C2.3 no unexplained Kpersistent PSA object at any failure boundary)
     target: []
   target_assignment: C7.1 non-exportability on target; C7.4 log and artifact audit.
   stack_gate: none
@@ -154,7 +157,8 @@ requirements:
     - evidence/C1.4.md
     - evidence/C2.1.md
     - evidence/C2.2.md
-  notes: C2.1 covers Kpersistent persisted-record content and handle ownership; C2.2 destroys orphaned Kpersistent keys; the C2.3 fault matrix remains. Credential private-key and session-key clauses remain open.
+    - evidence/C2.3.md
+  notes: C2.1 covers Kpersistent persisted-record content and handle ownership; C2.2 destroys orphaned Kpersistent keys; C2.3 proves no PSA-object leak across its fault matrix. Credential private-key and session-key clauses remain open.
 
 - requirement: ALIRO-UD-SYRS-P1-009
   summary: At least 16 reader_group_identifier bindings per Access Credential.
@@ -647,12 +651,14 @@ requirements:
     host:
       - persistent_key (C2.1 exact-pair storage, replacement, capacity, deletion)
       - persistent_key (C2.2 crash-safe replacement and deletion)
+      - persistent_key (C2.3 persistence fault matrix)
     target: []
   stack_gate: none
   evidence:
     - evidence/C2.1.md
     - evidence/C2.2.md
-  notes: Derivation is stack-owned. C2.1 and C2.2 cover the application record store only.
+    - evidence/C2.3.md
+  notes: Derivation is stack-owned. C2.1, C2.2, and C2.3 cover the application record store only.
 
 - requirement: ALIRO-UD-SYRS-P2-003
   summary: Fast-phase derivation of CryptogramSK and ExpeditedSK keys.

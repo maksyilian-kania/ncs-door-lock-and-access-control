@@ -52,7 +52,8 @@ AliroError Lookup(::Aliro::UserDevice::CredentialHandle handle,
  * `keyId`, and `ALIRO_NO_MEMORY` when inserting a new pair would exceed the
  * per-credential or global capacity. `keyId` stays owned by the caller on
  * every path. Once the new record is committed the call succeeds, even if
- * the previous key cannot be destroyed; that key is swept later.
+ * the previous key cannot be destroyed; that key is swept later. A record
+ * save that reports failure but is found persisted counts as committed.
  */
 AliroError Replace(::Aliro::UserDevice::CredentialHandle handle,
 		    const ::Aliro::UserDevice::ReaderGroupSubIdentifier &readerGroupSubIdentifier,

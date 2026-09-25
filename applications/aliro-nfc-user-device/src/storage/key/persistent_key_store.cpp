@@ -133,6 +133,28 @@ AliroError PersistLocked(size_t slotIndex, const Record &record)
 	return Persistence::SaveRecord(slotIndex, record);
 }
 
+enum class Durability : uint8_t {
+	Landed,
+	Absent,
+	Unknown,
+};
+
+/* Reads the slot back to learn whether `expected` is the persisted record. */
+Durability ProbeRecordLocked(size_t slotIndex, const Record &expected)
+{
+	Record persisted{};
+	bool present{ false };
+	if (Persistence::LoadRecord(slotIndex, persisted, present) != ALIRO_NO_ERROR) {
+		return Durability::Unknown;
+	}
+
+	const bool landed = present && persisted.mValid == expected.mValid && persisted.mHandle == expected.mHandle &&
+			    persisted.mCredentialHandle == expected.mCredentialHandle &&
+			    persisted.mReaderGroupSubIdentifier == expected.mReaderGroupSubIdentifier &&
+			    persisted.mPersistedKeyId == expected.mPersistedKeyId;
+	return landed ? Durability::Landed : Durability::Absent;
+}
+
 void KeepFirstError(AliroError &firstError, AliroError error)
 {
 	if (error != ALIRO_NO_ERROR && firstError == ALIRO_NO_ERROR) {
@@ -332,11 +354,24 @@ AliroError Replace(CredentialHandle handle, const ReaderGroupSubIdentifier &read
 	newRecord.mReaderGroupSubIdentifier = readerGroupSubIdentifier;
 	newRecord.mPersistedKeyId = actualPersistedKeyId;
 
+	/*
+	 * A failed save may still have landed, so the persisted record decides:
+	 * a landed record is committed; otherwise the new key goes (a failed
+	 * destroy leaves an unreferenced key, swept later). If the slot cannot be
+	 * read, both keys stay, so whichever record persisted keeps its key and
+	 * the next Init() sweeps the other.
+	 */
 	const AliroError persistError = PersistLocked(slotIndex, newRecord);
 	if (persistError != ALIRO_NO_ERROR) {
-		/* A failed destroy leaves an unreferenced key, swept later. */
-		(void)Backend::Destroy(actualPersistedKeyId);
-		return persistError;
+		switch (ProbeRecordLocked(slotIndex, newRecord)) {
+		case Durability::Landed:
+			break;
+		case Durability::Absent:
+			(void)Backend::Destroy(actualPersistedKeyId);
+			return persistError;
+		case Durability::Unknown:
+			return persistError;
+		}
 	}
 
 	*targetSlot = newRecord;

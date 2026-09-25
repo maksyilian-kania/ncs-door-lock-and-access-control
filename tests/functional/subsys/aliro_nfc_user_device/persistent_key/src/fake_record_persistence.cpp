@@ -10,6 +10,7 @@
 #include <storage/key/persistent_key_persistence.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 
 namespace AliroUd::PersistentKey::FakeStorage {
@@ -20,9 +21,13 @@ struct Slot {
 	std::array<uint8_t, sizeof(Record)> mBytes{};
 };
 
+constexpr size_t kNoSlot{ SIZE_MAX };
+
 std::array<Slot, kMaxRecords> sSlots{};
 bool sFailNextSave{ false };
 bool sFailNextErase{ false };
+bool sFailNextInit{ false };
+size_t sFailNextLoadSlot{ kNoSlot };
 size_t sWriteCount{ 0 };
 
 } // namespace
@@ -32,7 +37,24 @@ void Reset()
 	sSlots = {};
 	sFailNextSave = false;
 	sFailNextErase = false;
+	sFailNextInit = false;
+	sFailNextLoadSlot = kNoSlot;
 	sWriteCount = 0;
+}
+
+void FailNextInit()
+{
+	sFailNextInit = true;
+}
+
+void FailNextLoad(size_t slotIndex)
+{
+	sFailNextLoadSlot = slotIndex;
+}
+
+bool ReadFaultArmed()
+{
+	return sFailNextInit || sFailNextLoadSlot != kNoSlot;
 }
 
 void FailNextSave()
@@ -88,11 +110,21 @@ using namespace FakeStorage;
 
 AliroError Init()
 {
+	if (sFailNextInit) {
+		sFailNextInit = false;
+		return ALIRO_ERROR_INTERNAL;
+	}
 	return ALIRO_NO_ERROR;
 }
 
 AliroError LoadRecord(size_t slotIndex, Record &out, bool &outPresent)
 {
+	if (sFailNextLoadSlot == slotIndex) {
+		sFailNextLoadSlot = kNoSlot;
+		outPresent = false;
+		return ALIRO_ERROR_INTERNAL;
+	}
+
 	outPresent = sSlots[slotIndex].mPresent;
 	if (outPresent) {
 		std::memcpy(&out, sSlots[slotIndex].mBytes.data(), sizeof(Record));
@@ -106,14 +138,15 @@ AliroError SaveRecord(size_t slotIndex, const Record &value)
 		sFailNextSave = false;
 		return ALIRO_ERROR_INTERNAL;
 	}
-	if (!FakePower::AllowDurableWrite()) {
+	const FakePower::Outcome outcome = FakePower::NextDurableWrite(FakePower::Mutation::SaveRecord, slotIndex);
+	if (outcome == FakePower::Outcome::Refuse) {
 		return ALIRO_ERROR_INTERNAL;
 	}
 
 	std::memcpy(sSlots[slotIndex].mBytes.data(), &value, sizeof(Record));
 	sSlots[slotIndex].mPresent = true;
 	++sWriteCount;
-	return ALIRO_NO_ERROR;
+	return outcome == FakePower::Outcome::LandThenFail ? ALIRO_ERROR_INTERNAL : ALIRO_NO_ERROR;
 }
 
 AliroError EraseRecord(size_t slotIndex)
@@ -122,13 +155,14 @@ AliroError EraseRecord(size_t slotIndex)
 		sFailNextErase = false;
 		return ALIRO_ERROR_INTERNAL;
 	}
-	if (!FakePower::AllowDurableWrite()) {
+	const FakePower::Outcome outcome = FakePower::NextDurableWrite(FakePower::Mutation::EraseRecord, slotIndex);
+	if (outcome == FakePower::Outcome::Refuse) {
 		return ALIRO_ERROR_INTERNAL;
 	}
 
 	sSlots[slotIndex] = Slot{};
 	++sWriteCount;
-	return ALIRO_NO_ERROR;
+	return outcome == FakePower::Outcome::LandThenFail ? ALIRO_ERROR_INTERNAL : ALIRO_NO_ERROR;
 }
 
 } // namespace AliroUd::PersistentKey::Persistence

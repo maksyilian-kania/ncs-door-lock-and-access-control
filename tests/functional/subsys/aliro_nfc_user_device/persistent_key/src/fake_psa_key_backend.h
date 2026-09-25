@@ -56,8 +56,11 @@ void Reset();
 /** @brief Simulates a reboot: input and temporary objects vanish, durable objects and counters survive. */
 void Reboot();
 
-/** @brief Arms one failure of the next call to the given backend operation. */
-void FailNext(Fault fault);
+/** @brief Arms one failure of the given backend operation, after `skip` calls to it succeed. */
+void FailNext(Fault fault, size_t skip = 0);
+
+/** @brief Returns true while an armed fault has not fired. */
+bool FaultArmed();
 
 /** @brief Creates a caller-owned input key holding `material`; returns 0 when the object table is full. */
 ::Aliro::CryptoTypes::KeyId CreateInputKey(const Material &material);

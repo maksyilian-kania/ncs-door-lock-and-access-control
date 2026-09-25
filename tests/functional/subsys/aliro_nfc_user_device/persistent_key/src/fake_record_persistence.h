@@ -33,6 +33,15 @@ void FailNextSave();
 /** @brief Arms one failure of the next `Persistence::EraseRecord()`. */
 void FailNextErase();
 
+/** @brief Arms one failure of the next `Persistence::Init()`. */
+void FailNextInit();
+
+/** @brief Arms one failure of the next `Persistence::LoadRecord()` of `slotIndex`. */
+void FailNextLoad(size_t slotIndex);
+
+/** @brief Returns true while an armed `Init()` or `LoadRecord()` failure has not fired. */
+bool ReadFaultArmed();
+
 /** @brief Writes `record` into `slotIndex` directly, as if left by an earlier boot. */
 void Preload(size_t slotIndex, const Record &record);
 
