@@ -54,6 +54,12 @@ bool IsFaultArmed()
 	return sArmedFault != FaultPoint::None;
 }
 
+void WritePersistedSlot(size_t slotIndex, const PersistedCredential &value)
+{
+	sSlots[slotIndex] = value;
+	sSlotPresent[slotIndex] = true;
+}
+
 } // namespace AliroUd::Credential::Test
 
 namespace AliroUd::Credential::Persistence {

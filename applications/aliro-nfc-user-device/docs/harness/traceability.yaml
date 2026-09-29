@@ -130,16 +130,19 @@ requirements:
       - persistent_key (C2.1 record semantics, including reload of committed records)
       - persistent_key (C2.2 simulated power loss at every durable step and boot recovery)
       - persistent_key (C2.3 failure before and after every durable transition, read faults, double boot)
+      - document (C3.1 committed documents survive simulated reboot; deleted and reset documents do not reappear)
     target: []
   target_assignment: C7.1 reset and actual power-loss qualification.
   stack_gate: none
   evidence:
     - tests/functional/subsys/aliro_nfc_user_device/mailbox/src/test_mailbox_store.cpp
     - tests/functional/subsys/aliro_nfc_user_device/mailbox/src/test_mailbox_fault_injection.cpp
+    - tests/functional/subsys/aliro_nfc_user_device/document/src/test_document_snapshots.cpp
     - evidence/C2.1.md
     - evidence/C2.2.md
     - evidence/C2.3.md
-  notes: C2.1 covers Kpersistent record semantics, C2.2 its crash-safe recovery, and C2.3 its fault matrix on host. Document persistence is C3.1.
+    - evidence/C3.1.md
+  notes: C2.1 covers Kpersistent record semantics, C2.2 its crash-safe recovery, and C2.3 its fault matrix on host. C3.1 covers document persistence across simulated reboot; document delete failure atomicity is C3.2.
 
 - requirement: ALIRO-UD-SYRS-P1-008
   summary: No export of the credential private key, Kpersistent, or session keys via CLI, NFC, logs, or diagnostics.
@@ -735,20 +738,28 @@ requirements:
   application_slices: [C3.1, C3.2, C5.1, C6.1, C7.1, C7.3]
   application_status: planned
   verification:
-    host: []
+    host:
+      - document (C3.1 exact-byte storage, retrieval, replacement, deletion, reset, immutable snapshots, bounds, capacity)
     target: []
   stack_gate: none
-  notes: Not audited in C1.4.
+  evidence:
+    - tests/functional/subsys/aliro_nfc_user_device/document/src/test_document_snapshots.cpp
+    - evidence/C3.1.md
+  notes: C3.1 covers application storage and snapshots only. Provisioning validation is C3.2; Step-Up retrieval is C5/C6.
 
 - requirement: ALIRO-UD-SYRS-P2-022
   summary: Store and retrieve a Revocation Document.
   application_slices: [C3.1, C3.2, C6.1, C6.2, C7.1, C7.3]
   application_status: planned
   verification:
-    host: []
+    host:
+      - document (C3.1 exact-byte storage, retrieval, replacement, deletion, reset, immutable snapshots, bounds, capacity)
     target: []
   stack_gate: none
-  notes: Not audited in C1.4. The harness README stack gate is assessed by C6.1.
+  evidence:
+    - tests/functional/subsys/aliro_nfc_user_device/document/src/test_document_snapshots.cpp
+    - evidence/C3.1.md
+  notes: C3.1 covers application storage and snapshots only. Provisioning validation is C3.2. The harness README stack gate is assessed by C6.1.
 
 - requirement: ALIRO-UD-SYRS-P2-023
   summary: Signal retrievable Access and Revocation Documents in the AUTH1 signaling_bitmap.

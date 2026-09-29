@@ -6,6 +6,10 @@
 
 #pragma once
 
+#include <storage/credential/credential_types.h>
+
+#include <cstddef>
+
 /**
  * @brief In-memory fake for `credential_persistence.h` (APP_PLAN.md AWP3
  * host-test support).
@@ -42,5 +46,11 @@ void ArmFault(FaultPoint point);
 
 /** @brief Whether a fault is currently still armed (not yet consumed). */
 bool IsFaultArmed();
+
+/**
+ * @brief Writes a slot record directly, bypassing the store, as if it were
+ * already on flash; takes effect at the next `Store::Init()`.
+ */
+void WritePersistedSlot(size_t slotIndex, const PersistedCredential &value);
 
 } // namespace AliroUd::Credential::Test

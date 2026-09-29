@@ -35,4 +35,7 @@ AliroError Read(::Aliro::UserDevice::DocumentSnapshotHandle snapshot, size_t off
 /** @copydoc ::Aliro::Interface::UserDevice::Document::Close */
 void Close(::Aliro::UserDevice::DocumentSnapshotHandle snapshot);
 
+/** @brief Number of currently open snapshots. Test/diagnostic use only. */
+size_t GetOpenSnapshotCount();
+
 } // namespace AliroUd::Document::Snapshots

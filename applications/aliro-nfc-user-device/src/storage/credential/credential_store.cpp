@@ -574,6 +574,11 @@ AliroError GetFullRecord(CredentialHandle handle, PersistedCredential &out)
 
 AliroError DeleteDocument(CredentialHandle handle, ::Aliro::AccessDocumentTypes::DocumentType type)
 {
+	if (type != ::Aliro::AccessDocumentTypes::DocumentType::Access &&
+	    type != ::Aliro::AccessDocumentTypes::DocumentType::Revocation) {
+		return ALIRO_INVALID_ARGUMENT;
+	}
+
 	Lock lock;
 
 	size_t slotIndex{};

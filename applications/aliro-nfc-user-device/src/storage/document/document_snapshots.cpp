@@ -20,6 +20,16 @@ using namespace Aliro;
 using namespace Aliro::UserDevice;
 using namespace Aliro::AccessDocumentTypes;
 
+/*
+ * The public Document contract bounds one open snapshot to
+ * CONFIG_NCS_ALIRO_USER_DEVICE_MAX_DOCUMENT_SNAPSHOT_BYTES, and AUTH1 opens
+ * the Access and Revocation snapshots of one credential concurrently.
+ */
+static_assert(AliroUd::Credential::kDocumentMaxSizeBytes <= CONFIG_NCS_ALIRO_USER_DEVICE_MAX_DOCUMENT_SNAPSHOT_BYTES,
+	      "CONFIG_ALIRO_UD_DOCUMENT_MAX_SIZE exceeds the stack's document snapshot bound");
+static_assert(CONFIG_ALIRO_UD_MAX_OPEN_DOCUMENT_SNAPSHOTS >= 2,
+	      "Access and Revocation snapshots of one session must be open concurrently");
+
 namespace AliroUd::Document::Snapshots {
 namespace {
 
@@ -70,6 +80,10 @@ Snapshot *FindLocked(DocumentSnapshotHandle handle)
 AliroError Open(CredentialHandle handle, DocumentType type, DocumentSnapshotHandle &outSnapshot)
 {
 	outSnapshot = kInvalidDocumentSnapshotHandle;
+	if (type != DocumentType::Access && type != DocumentType::Revocation) {
+		return ALIRO_INVALID_ARGUMENT;
+	}
+
 	Lock lock;
 
 	AliroUd::Credential::PersistedCredential record{};
@@ -82,6 +96,11 @@ AliroError Open(CredentialHandle handle, DocumentType type, DocumentSnapshotHand
 		(type == DocumentType::Access) ? record.mAccessDocument : record.mRevocationDocument;
 	if (!document.mPresent) {
 		return ALIRO_INVALID_ARGUMENT;
+	}
+	/* A persisted length beyond the buffer (e.g. corrupted storage) must not be read past. */
+	if (document.mLength > document.mData.size()) {
+		LOG_ERR("Stored document length %u exceeds capacity %zu", document.mLength, document.mData.size());
+		return ALIRO_NO_MEMORY;
 	}
 
 	Snapshot *freeSlot{ nullptr };
@@ -133,7 +152,7 @@ AliroError Read(DocumentSnapshotHandle snapshot, size_t offset, uint8_t *outData
 		return ALIRO_INVALID_STATE;
 	}
 
-	if (!InBounds(offset, length, found->mLength)) {
+	if (!InBounds(offset, length, found->mLength) || (outData == nullptr && length != 0)) {
 		return ALIRO_INVALID_ARGUMENT;
 	}
 
@@ -151,6 +170,14 @@ void Close(DocumentSnapshotHandle snapshot)
 	}
 
 	*found = Snapshot{};
+}
+
+size_t GetOpenSnapshotCount()
+{
+	Lock lock;
+
+	return static_cast<size_t>(
+		std::count_if(sSnapshots.begin(), sSnapshots.end(), [](const Snapshot &s) { return s.mActive; }));
 }
 
 } // namespace AliroUd::Document::Snapshots

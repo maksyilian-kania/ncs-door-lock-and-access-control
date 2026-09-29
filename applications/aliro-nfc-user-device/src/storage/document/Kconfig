@@ -9,7 +9,7 @@ menu "Access/Revocation Document snapshots"
 config ALIRO_UD_MAX_OPEN_DOCUMENT_SNAPSHOTS
 	int "Maximum concurrently open Document snapshots"
 	default 2
-	range 1 8
+	range 2 8
 	help
 	  Fixed capacity of the open-snapshot table (APP_PLAN.md AWP5). AUTH1
 	  opens both the Access Document and Revocation Document snapshots
