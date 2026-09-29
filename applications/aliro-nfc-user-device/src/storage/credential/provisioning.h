@@ -10,7 +10,9 @@
 
 #include <aliro/types.h>
 
+#include <cstddef>
 #include <cstring>
+#include <type_traits>
 
 /**
  * @brief Wire format for the `ConstData provisioningInput` byte blob
@@ -81,16 +83,40 @@ inline ::Aliro::ConstData AsConstData(const Payload &payload)
 	return ::Aliro::ConstData{ reinterpret_cast<const uint8_t *>(&payload), sizeof(payload) };
 }
 
+static_assert(std::is_standard_layout_v<Payload>, "Payload field offsets must be well-defined");
+static_assert(sizeof(bool) == 1, "each bool field is checked as one byte");
+
+/* Offsets of every `bool` in `Payload`; only 0 and 1 are valid object representations. */
+constexpr size_t kBoolOffsets[]{
+	offsetof(Payload, mHasNewKeyInput),
+	offsetof(Payload, mPolicySet),
+	offsetof(Payload, mMailbox.mConfigured),
+	offsetof(Payload, mMailbox.mReadable),
+	offsetof(Payload, mMailbox.mWritable),
+	offsetof(Payload, mMailbox.mDataSubsetConfigured),
+	offsetof(Payload, mHasCredentialSignedTimestamp),
+	offsetof(Payload, mHasRevocationSignedTimestamp),
+	offsetof(Payload, mAccessDocument.mPresent),
+	offsetof(Payload, mRevocationDocument.mPresent),
+};
+
 /**
  * @brief Parses a `ConstData` provisioning input into a `Payload`.
  *
  * @return true if `input` is exactly `sizeof(Payload)` bytes with a matching
- * magic/version, false otherwise (malformed input).
+ * magic/version and every `bool` field encoded as 0 or 1, false otherwise
+ * (malformed input).
  */
 inline bool Parse(::Aliro::ConstData input, Payload &out)
 {
 	if (input.mData == nullptr || input.mLength != sizeof(Payload)) {
 		return false;
+	}
+
+	for (const size_t offset : kBoolOffsets) {
+		if (input.mData[offset] > 1) {
+			return false;
+		}
 	}
 
 	Payload candidate{};

@@ -358,7 +358,7 @@ ZTEST(aliro_ud_document, test_open_snapshot_is_immutable_across_replacement_and_
 /* A zero-length document opens with size 0 and only an empty read at offset 0 succeeds. */
 ZTEST(aliro_ud_document, test_zero_length_document_snapshot)
 {
-	/* Seeded on flash: whether provisioning accepts an empty document is C3.2's. */
+	/* Seeded on flash: provisioning rejects an empty document. */
 	OptionalDocument empty{};
 	empty.mPresent = true;
 	const auto handle = Create(0x51, kAbsent, kAbsent);
@@ -650,6 +650,154 @@ ZTEST(aliro_ud_document, test_reset_documents_do_not_reappear)
 			zassert_false(CredentialExists(handles[i]));
 			ExpectStored(handles[i], kAbsent, kAbsent);
 		}
+		Reboot();
+	}
+
+	ExpectNoOpenSnapshots();
+}
+
+/*
+ * Present documents are 1 to the configured maximum bytes long (a document
+ * is a non-empty CBOR structure, section 7.2, page 32); absent documents and
+ * bytes past the length are zero. Anything else is rejected before any
+ * state changes.
+ */
+ZTEST(aliro_ud_document, test_provisioning_rejects_inconsistent_documents)
+{
+	static OptionalDocument committed{};
+	committed = MakeDocument(Len(5), 0x13);
+	const auto handle = Create(0x13, committed, kAbsent);
+
+	static std::array<OptionalDocument, 5> rejected{};
+	size_t count = 0;
+	rejected[count] = OptionalDocument{};
+	rejected[count++].mPresent = true;
+	rejected[count] = OptionalDocument{};
+	rejected[count].mPresent = true;
+	rejected[count++].mLength = static_cast<uint32_t>(kMaxSize + 1);
+	rejected[count] = OptionalDocument{};
+	rejected[count++].mLength = 1;
+	rejected[count] = OptionalDocument{};
+	rejected[count++].mData[kMaxSize - 1] = 0x01;
+	if (kMaxSize >= 2) {
+		rejected[count] = MakeDocument(kMaxSize - 1, 0x21);
+		rejected[count++].mData[kMaxSize - 1] = 0x01;
+	}
+
+	for (size_t i = 0; i < count; ++i) {
+		for (const bool asRevocation : { false, true }) {
+			const auto &access = asRevocation ? kAbsent : rejected[i];
+			const auto &revocation = asRevocation ? rejected[i] : kAbsent;
+
+			auto &payload = PayloadWith(0x14, access, revocation);
+			zassert_equal(ALIRO_INVALID_ARGUMENT, CredentialStore::Validate(payload), "case %zu", i);
+			payload.mHasNewKeyInput = true;
+			payload.mNewKeyScalar = KeyScalar(0x14);
+			CredentialHandle created{ 0x5a };
+			zassert_equal(ALIRO_INVALID_ARGUMENT, CredentialStore::Create(payload, created), "case %zu", i);
+			zassert_equal(kInvalidCredentialHandle, created);
+			zassert_equal(ALIRO_INVALID_ARGUMENT,
+				      CredentialStore::Update(handle, PayloadWith(0x13, access, revocation)), "case %zu",
+				      i);
+			ExpectStored(handle, committed, kAbsent);
+			if (kCredentials >= 2) {
+				zassert_false(CredentialExists(handle + 1));
+			}
+		}
+	}
+	Reboot();
+	ExpectStored(handle, committed, kAbsent);
+
+	/* The smallest and largest documents are accepted. */
+	static OptionalDocument smallest{};
+	static OptionalDocument largest{};
+	smallest = MakeDocument(1, 0x15);
+	largest = MakeDocument(kMaxSize, 0x16);
+	Update(handle, 0x13, smallest, largest);
+	ExpectStored(handle, smallest, largest);
+
+	ExpectNoOpenSnapshots();
+}
+
+/* A failed document clear keeps the committed document in RAM and on flash; deleting nothing writes nothing. */
+ZTEST(aliro_ud_document, test_failed_document_clear_keeps_committed_document)
+{
+	namespace FakeFlash = AliroUd::Credential::Test;
+
+	static OptionalDocument access{};
+	static OptionalDocument revocation{};
+	access = MakeDocument(Len(12), 0xe1);
+	revocation = MakeDocument(Len(13), 0xe2);
+	const auto handle = Create(0xe1, access, revocation);
+
+	for (const auto type : kTypes) {
+		FakeFlash::ArmFault(FakeFlash::FaultPoint::SaveSlot);
+		zassert_equal(ALIRO_ERROR_INTERNAL, Document::Delete(handle, type));
+		zassert_false(FakeFlash::IsFaultArmed(), "the delete must reach persistence");
+		for (int boot = 0; boot < 2; ++boot) {
+			ExpectStored(handle, access, revocation);
+			Reboot();
+		}
+	}
+
+	/* A document reset keeps the document whose deletion failed and deletes the others. */
+	FakeFlash::ArmFault(FakeFlash::FaultPoint::SaveSlot);
+	zassert_equal(ALIRO_ERROR_INTERNAL, Document::Reset());
+	for (int boot = 0; boot < 2; ++boot) {
+		ExpectStored(handle, access, kAbsent);
+		Reboot();
+	}
+
+	FakeFlash::ArmFault(FakeFlash::FaultPoint::SaveSlot);
+	zassert_equal(ALIRO_NO_ERROR, Document::Delete(handle, DocumentType::Revocation));
+	zassert_true(FakeFlash::IsFaultArmed(), "deleting an absent document writes nothing");
+	FakeFlash::ArmFault(FakeFlash::FaultPoint::None);
+
+	zassert_equal(ALIRO_NO_ERROR, Document::Delete(handle, DocumentType::Access));
+	for (int boot = 0; boot < 2; ++boot) {
+		zassert_true(CredentialExists(handle));
+		ExpectStored(handle, kAbsent, kAbsent);
+		Reboot();
+	}
+
+	ExpectNoOpenSnapshots();
+}
+
+/* A failed credential delete keeps its documents across reboot; a completed one survives a failed journal erase. */
+ZTEST(aliro_ud_document, test_failed_credential_delete_keeps_documents)
+{
+	namespace FakeFlash = AliroUd::Credential::Test;
+
+	static OptionalDocument access{};
+	static OptionalDocument revocation{};
+	access = MakeDocument(Len(17), 0xf1);
+	revocation = MakeDocument(Len(18), 0xf2);
+	const auto handle = Create(0xf1, access, revocation);
+
+	for (const auto fault : { FakeFlash::FaultPoint::SaveJournal, FakeFlash::FaultPoint::EraseSlot }) {
+		FakeFlash::ArmFault(fault);
+		zassert_equal(ALIRO_ERROR_INTERNAL, CredentialStore::Delete(handle));
+		zassert_false(FakeFlash::IsFaultArmed(), "the delete must reach persistence");
+		for (int boot = 0; boot < 2; ++boot) {
+			zassert_true(CredentialExists(handle), "a failed delete is not finished at boot");
+			ExpectStored(handle, access, revocation);
+			Reboot();
+		}
+	}
+
+	FakeFlash::ArmFault(FakeFlash::FaultPoint::EraseJournal);
+	zassert_equal(ALIRO_NO_ERROR, CredentialStore::Delete(handle));
+	zassert_false(FakeFlash::IsFaultArmed());
+	for (int boot = 0; boot < 2; ++boot) {
+		zassert_false(CredentialExists(handle));
+		ExpectStored(handle, kAbsent, kAbsent);
+		Reboot();
+	}
+
+	const auto reused = Create(0xf3, revocation, kAbsent);
+	zassert_equal(handle, reused);
+	for (int boot = 0; boot < 2; ++boot) {
+		ExpectStored(reused, revocation, kAbsent);
 		Reboot();
 	}
 

@@ -250,7 +250,9 @@ AliroError ApplyDirtyBytes(CredentialHandle credentialHandle, const std::array<u
 	return ALIRO_NO_ERROR;
 }
 
-AliroError EraseForCredential(CredentialHandle credentialHandle)
+namespace {
+
+AliroError Erase(CredentialHandle credentialHandle, MailboxRecord *outErased)
 {
 	Lock lock;
 
@@ -266,7 +268,43 @@ AliroError EraseForCredential(CredentialHandle credentialHandle)
 	const auto error = Persistence::EraseSlot(slotIndex);
 	VerifyOrReturnStatus(error == ALIRO_NO_ERROR, error, LOG_ERR("Failed to erase mailbox slot %zu", slotIndex));
 
+	if (outErased != nullptr) {
+		*outErased = sSlots[slotIndex];
+	}
 	sSlots[slotIndex] = MailboxRecord{};
+	return ALIRO_NO_ERROR;
+}
+
+} // namespace
+
+AliroError EraseForCredential(CredentialHandle credentialHandle)
+{
+	return Erase(credentialHandle, nullptr);
+}
+
+AliroError EraseForCredential(CredentialHandle credentialHandle, MailboxRecord &outErased)
+{
+	outErased = MailboxRecord{};
+	return Erase(credentialHandle, &outErased);
+}
+
+AliroError Restore(CredentialHandle credentialHandle, const MailboxRecord &record)
+{
+	Lock lock;
+
+	size_t slotIndex{};
+	if (!HandleToSlotIndex(credentialHandle, slotIndex)) {
+		return ALIRO_INVALID_ARGUMENT;
+	}
+
+	if (!record.mInitialized) {
+		return ALIRO_NO_ERROR;
+	}
+
+	const auto error = Persistence::SaveSlot(slotIndex, record);
+	VerifyOrReturnStatus(error == ALIRO_NO_ERROR, error, LOG_ERR("Failed to restore mailbox slot %zu", slotIndex));
+
+	sSlots[slotIndex] = record;
 	return ALIRO_NO_ERROR;
 }
 

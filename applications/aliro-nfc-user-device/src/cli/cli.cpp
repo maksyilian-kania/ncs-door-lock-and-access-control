@@ -25,6 +25,8 @@
 #include <aliro/user_device/user_device.h>
 
 #include <cstdlib>
+#include <cstring>
+#include <limits>
 
 /*
  * Development CLI over the DK virtual UART (APP_PLAN.md AWP2/AWP3): a
@@ -67,22 +69,35 @@ void PrintError(const struct shell *sh, const char *command, AliroError error)
 	shell_print(sh, "ERR %d command=%s", error.ToInt(), command);
 }
 
+int HexNibble(char c)
+{
+	if (c >= '0' && c <= '9') {
+		return c - '0';
+	}
+	if (c >= 'a' && c <= 'f') {
+		return c - 'a' + 10;
+	}
+	if (c >= 'A' && c <= 'F') {
+		return c - 'A' + 10;
+	}
+	return -1;
+}
+
+/* Exactly `outLen` bytes of hex digits; `out` is written only if the whole input is valid. */
 bool ParseHexBytes(const char *hex, uint8_t *out, size_t outLen)
 {
 	if (strlen(hex) != outLen * 2) {
 		return false;
 	}
 
-	for (size_t i = 0; i < outLen; ++i) {
-		char byteStr[3]{ hex[2 * i], hex[2 * i + 1], '\0' };
-		char *end{ nullptr };
-		const unsigned long value = strtoul(byteStr, &end, 16);
-
-		if (end != byteStr + 2) {
+	for (size_t i = 0; i < outLen * 2; ++i) {
+		if (HexNibble(hex[i]) < 0) {
 			return false;
 		}
+	}
 
-		out[i] = static_cast<uint8_t>(value);
+	for (size_t i = 0; i < outLen; ++i) {
+		out[i] = static_cast<uint8_t>((HexNibble(hex[2 * i]) << 4) | HexNibble(hex[2 * i + 1]));
 	}
 
 	return true;
@@ -93,11 +108,45 @@ template <size_t N> bool ParseHexArray(const char *hex, std::array<uint8_t, N> &
 	return ParseHexBytes(hex, out.data(), N);
 }
 
+/* Decimal digits only: no sign, whitespace, or prefix. An out-of-range value saturates to ULONG_MAX. */
 bool ParseUint(const char *str, unsigned long &out)
 {
-	char *end{ nullptr };
-	out = strtoul(str, &end, 10);
-	return end != str && *end == '\0';
+	if (*str == '\0') {
+		return false;
+	}
+
+	for (const char *c = str; *c != '\0'; ++c) {
+		if (*c < '0' || *c > '9') {
+			return false;
+		}
+	}
+
+	out = strtoul(str, nullptr, 10);
+	return true;
+}
+
+bool ParseHandle(const char *str, ::Aliro::UserDevice::CredentialHandle &out)
+{
+	unsigned long value{};
+	if (!ParseUint(str, value) || value > std::numeric_limits<::Aliro::UserDevice::CredentialHandle>::max()) {
+		return false;
+	}
+
+	out = static_cast<::Aliro::UserDevice::CredentialHandle>(value);
+	return true;
+}
+
+bool ParseDocumentType(const char *str, ::Aliro::AccessDocumentTypes::DocumentType &out)
+{
+	if (strcmp(str, "access") == 0) {
+		out = ::Aliro::AccessDocumentTypes::DocumentType::Access;
+		return true;
+	}
+	if (strcmp(str, "revocation") == 0) {
+		out = ::Aliro::AccessDocumentTypes::DocumentType::Revocation;
+		return true;
+	}
+	return false;
 }
 
 int CmdInfo(const struct shell *sh, size_t argc, char **argv)
@@ -205,16 +254,14 @@ int CmdCredentialBeginUpdate(const struct shell *sh, size_t argc, char **argv)
 		return 0;
 	}
 
-	unsigned long handle{};
-	if (!ParseUint(argv[1], handle)) {
+	::Aliro::UserDevice::CredentialHandle handle{};
+	if (!ParseHandle(argv[1], handle)) {
 		shell_print(sh, "ERR INVALID_ARGUMENT command=credential begin-update");
 		return 0;
 	}
 
 	AliroUd::Credential::PersistedCredential record{};
-	const auto error =
-		AliroUd::Credential::Store::GetFullRecord(static_cast<::Aliro::UserDevice::CredentialHandle>(handle),
-							  record);
+	const auto error = AliroUd::Credential::Store::GetFullRecord(handle, record);
 	if (error != ALIRO_NO_ERROR) {
 		PrintError(sh, "credential begin-update", error);
 		return 0;
@@ -223,7 +270,7 @@ int CmdCredentialBeginUpdate(const struct shell *sh, size_t argc, char **argv)
 	sCandidate = StagingCandidate{};
 	sCandidate.mActive = true;
 	sCandidate.mIsUpdate = true;
-	sCandidate.mBaseHandle = static_cast<::Aliro::UserDevice::CredentialHandle>(handle);
+	sCandidate.mBaseHandle = handle;
 	sCandidate.mPolicySet = true;
 	sCandidate.mPolicy = record.mPolicy;
 	sCandidate.mBindingCount = record.mBindingCount;
@@ -428,42 +475,83 @@ int CmdCredentialSetRevocationTimestamp(const struct shell *sh, size_t argc, cha
 	return 0;
 }
 
-int SetDocument(const struct shell *sh, const char *command, const char *hex, AliroUd::Credential::OptionalDocument &out)
+AliroUd::Credential::OptionalDocument &StagedDocument(::Aliro::AccessDocumentTypes::DocumentType type)
 {
+	return (type == ::Aliro::AccessDocumentTypes::DocumentType::Access) ? sCandidate.mAccessDocument
+									     : sCandidate.mRevocationDocument;
+}
+
+bool &DocumentStaged(::Aliro::AccessDocumentTypes::DocumentType type)
+{
+	return (type == ::Aliro::AccessDocumentTypes::DocumentType::Access) ? sCandidate.mAccessDocumentStaged
+									     : sCandidate.mRevocationDocumentStaged;
+}
+
+/*
+ * The declared length guards against a truncated UART line. A document is
+ * a non-empty CBOR structure (Aliro 1.0 Specification, section 7.2, page
+ * 32), so length 0 is rejected; "clear-document" removes a document.
+ */
+int CmdCredentialSetDocument(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+
 	if (!sCandidate.mActive) {
-		shell_print(sh, "ERR NO_TRANSACTION command=%s", command);
+		shell_print(sh, "ERR NO_TRANSACTION command=credential set-document");
 		return 0;
 	}
 
-	const size_t hexLen = strlen(hex);
-	if (hexLen % 2 != 0 || hexLen / 2 > kDocumentMaxSizeBytes) {
-		shell_print(sh, "ERR INVALID_ARGUMENT command=%s", command);
+	::Aliro::AccessDocumentTypes::DocumentType type{};
+	unsigned long length{};
+	if (!ParseDocumentType(argv[1], type) || !ParseUint(argv[2], length) || length == 0 ||
+	    length > kDocumentMaxSizeBytes) {
+		shell_print(sh, "ERR INVALID_ARGUMENT command=credential set-document");
+		return 0;
+	}
+
+	if (DocumentStaged(type)) {
+		shell_print(sh, "ERR DUPLICATE_FIELD command=credential set-document");
 		return 0;
 	}
 
 	AliroUd::Credential::OptionalDocument document{};
-	document.mLength = static_cast<uint32_t>(hexLen / 2);
-	if (!ParseHexBytes(hex, document.mData.data(), document.mLength)) {
-		shell_print(sh, "ERR INVALID_ARGUMENT command=%s", command);
+	document.mPresent = true;
+	document.mLength = static_cast<uint32_t>(length);
+	if (!ParseHexBytes(argv[3], document.mData.data(), document.mLength)) {
+		shell_print(sh, "ERR INVALID_ARGUMENT command=credential set-document");
 		return 0;
 	}
-	document.mPresent = true;
 
-	out = document;
+	StagedDocument(type) = document;
+	DocumentStaged(type) = true;
 	shell_print(sh, "OK");
 	return 0;
 }
 
-int CmdCredentialSetAccessDocument(const struct shell *sh, size_t argc, char **argv)
+int CmdCredentialClearDocument(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
-	return SetDocument(sh, "credential set-access-document", argv[1], sCandidate.mAccessDocument);
-}
 
-int CmdCredentialSetRevocationDocument(const struct shell *sh, size_t argc, char **argv)
-{
-	ARG_UNUSED(argc);
-	return SetDocument(sh, "credential set-revocation-document", argv[1], sCandidate.mRevocationDocument);
+	if (!sCandidate.mActive) {
+		shell_print(sh, "ERR NO_TRANSACTION command=credential clear-document");
+		return 0;
+	}
+
+	::Aliro::AccessDocumentTypes::DocumentType type{};
+	if (!ParseDocumentType(argv[1], type)) {
+		shell_print(sh, "ERR INVALID_ARGUMENT command=credential clear-document");
+		return 0;
+	}
+
+	if (DocumentStaged(type)) {
+		shell_print(sh, "ERR DUPLICATE_FIELD command=credential clear-document");
+		return 0;
+	}
+
+	StagedDocument(type) = AliroUd::Credential::OptionalDocument{};
+	DocumentStaged(type) = true;
+	shell_print(sh, "OK");
+	return 0;
 }
 
 int CmdCredentialCommit(const struct shell *sh, size_t argc, char **argv)
@@ -536,15 +624,14 @@ int CmdCredentialInspect(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 
-	unsigned long handle{};
-	if (!ParseUint(argv[1], handle)) {
+	::Aliro::UserDevice::CredentialHandle handle{};
+	if (!ParseHandle(argv[1], handle)) {
 		shell_print(sh, "ERR INVALID_ARGUMENT command=credential inspect");
 		return 0;
 	}
 
 	::Aliro::UserDevice::CredentialMetadata meta{};
-	const auto error = Aliro::UserDeviceStack::Instance().GetCredentialMetadata(
-		static_cast<::Aliro::UserDevice::CredentialHandle>(handle), meta);
+	const auto error = Aliro::UserDeviceStack::Instance().GetCredentialMetadata(handle, meta);
 
 	if (error != ALIRO_NO_ERROR) {
 		PrintError(sh, "credential inspect", error);
@@ -577,27 +664,15 @@ int CmdCredentialDelete(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 
-	unsigned long handle{};
-	if (!ParseUint(argv[1], handle)) {
+	::Aliro::UserDevice::CredentialHandle handle{};
+	if (!ParseHandle(argv[1], handle)) {
 		shell_print(sh, "ERR INVALID_ARGUMENT command=credential delete");
 		return 0;
 	}
 
-	const auto credentialHandle = static_cast<::Aliro::UserDevice::CredentialHandle>(handle);
-	const AliroError error = AliroUd::Lifecycle::RunMutation([&]() -> AliroError {
-		const auto deleteError = Aliro::UserDeviceStack::Instance().DeleteCredential(credentialHandle);
-		if (deleteError == ALIRO_NO_ERROR) {
-			/*
-			 * Erase this credential's mailbox byte storage too (APP_PLAN.md
-			 * AWP6): credential handles are reused for the next Create() at
-			 * the same slot (storage/credential/Kconfig), so a deleted
-			 * credential's mailbox content must not leak into whichever
-			 * credential is provisioned next at the same handle.
-			 */
-			AliroUd::Mailbox::Store::EraseForCredential(credentialHandle);
-		}
-		return deleteError;
-	});
+	/* The Credential adapter also erases the credential's mailbox (storage/credential/credential.cpp). */
+	const AliroError error = AliroUd::Lifecycle::RunMutation(
+		[&]() -> AliroError { return Aliro::UserDeviceStack::Instance().DeleteCredential(handle); });
 
 	if (error != ALIRO_NO_ERROR) {
 		PrintError(sh, "credential delete", error);
@@ -613,14 +688,8 @@ int CmdCredentialReset(const struct shell *sh, size_t argc, char **argv)
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
 
-	const AliroError error = AliroUd::Lifecycle::RunMutation([]() -> AliroError {
-		const auto resetError = Aliro::UserDeviceStack::Instance().ResetProvisionedData();
-		if (resetError == ALIRO_NO_ERROR) {
-			/* Every credential's mailbox byte storage too (see credential delete's comment above). */
-			AliroUd::Mailbox::Store::EraseAll();
-		}
-		return resetError;
-	});
+	const AliroError error = AliroUd::Lifecycle::RunMutation(
+		[]() -> AliroError { return Aliro::UserDeviceStack::Instance().ResetProvisionedData(); });
 
 	if (error != ALIRO_NO_ERROR) {
 		PrintError(sh, "credential reset", error);
@@ -635,15 +704,14 @@ int CmdCredentialBindings(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 
-	unsigned long handle{};
-	if (!ParseUint(argv[1], handle)) {
+	::Aliro::UserDevice::CredentialHandle handle{};
+	if (!ParseHandle(argv[1], handle)) {
 		shell_print(sh, "ERR INVALID_ARGUMENT command=credential bindings");
 		return 0;
 	}
 
 	size_t count{ 0 };
-	auto error = Aliro::UserDeviceStack::Instance().GetCredentialGroupBindingCount(
-		static_cast<::Aliro::UserDevice::CredentialHandle>(handle), count);
+	auto error = Aliro::UserDeviceStack::Instance().GetCredentialGroupBindingCount(handle, count);
 	if (error != ALIRO_NO_ERROR) {
 		PrintError(sh, "credential bindings", error);
 		return 0;
@@ -652,8 +720,7 @@ int CmdCredentialBindings(const struct shell *sh, size_t argc, char **argv)
 	shell_fprintf(sh, SHELL_NORMAL, "OK count=%zu bindings=", count);
 	for (size_t i = 0; i < count; ++i) {
 		::Aliro::UserDevice::ReaderGroupIdentifier identifier{};
-		error = Aliro::UserDeviceStack::Instance().GetCredentialGroupBinding(
-			static_cast<::Aliro::UserDevice::CredentialHandle>(handle), i, identifier);
+		error = Aliro::UserDeviceStack::Instance().GetCredentialGroupBinding(handle, i, identifier);
 		if (error != ALIRO_NO_ERROR) {
 			shell_fprintf(sh, SHELL_NORMAL, "<error>");
 			break;
@@ -675,14 +742,13 @@ int CmdCredentialPreferredSet(const struct shell *sh, size_t argc, char **argv)
 	ARG_UNUSED(argc);
 
 	::Aliro::UserDevice::ReaderGroupIdentifier identifier{};
-	unsigned long handle{};
-	if (!ParseHexArray(argv[1], identifier) || !ParseUint(argv[2], handle)) {
+	::Aliro::UserDevice::CredentialHandle handle{};
+	if (!ParseHexArray(argv[1], identifier) || !ParseHandle(argv[2], handle)) {
 		shell_print(sh, "ERR INVALID_ARGUMENT command=credential preferred-set");
 		return 0;
 	}
 
-	const auto error = AliroUd::Credential::Store::SetPreferredCredential(
-		identifier, static_cast<::Aliro::UserDevice::CredentialHandle>(handle));
+	const auto error = AliroUd::Credential::Store::SetPreferredCredential(identifier, handle);
 	if (error != ALIRO_NO_ERROR) {
 		PrintError(sh, "credential preferred-set", error);
 		return 0;
@@ -727,13 +793,12 @@ int CmdMailboxInspect(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 
-	unsigned long handle{};
-	if (!ParseUint(argv[1], handle)) {
+	::Aliro::UserDevice::CredentialHandle credentialHandle{};
+	if (!ParseHandle(argv[1], credentialHandle)) {
 		shell_print(sh, "ERR INVALID_ARGUMENT command=mailbox inspect");
 		return 0;
 	}
 
-	const auto credentialHandle = static_cast<::Aliro::UserDevice::CredentialHandle>(handle);
 	AliroUd::Mailbox::Store::Config config{};
 	const auto error = AliroUd::Mailbox::Store::GetConfig(credentialHandle, config);
 	if (error != ALIRO_NO_ERROR) {
@@ -750,7 +815,7 @@ int CmdMailboxInspect(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh,
 		    "OK handle=%u size=%u readable=%u writable=%u data_subset_configured=%u data_subset_pairs=%u "
 		    "initialized=%u has_data=%u",
-		    static_cast<unsigned>(handle), config.mSizeBytes, config.mPermissions.mReadable ? 1U : 0U,
+		    static_cast<unsigned>(credentialHandle), config.mSizeBytes, config.mPermissions.mReadable ? 1U : 0U,
 		    config.mPermissions.mWritable ? 1U : 0U, config.mDataSubsetConfigured ? 1U : 0U,
 		    static_cast<unsigned>(config.mDataSubsetPairCount),
 		    AliroUd::Mailbox::Store::IsInitialized(credentialHandle) ? 1U : 0U,
@@ -762,18 +827,17 @@ int CmdMailboxRead(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 
-	unsigned long handle{};
+	::Aliro::UserDevice::CredentialHandle handle{};
 	unsigned long offset{};
 	unsigned long length{};
-	if (!ParseUint(argv[1], handle) || !ParseUint(argv[2], offset) || !ParseUint(argv[3], length) ||
+	if (!ParseHandle(argv[1], handle) || !ParseUint(argv[2], offset) || !ParseUint(argv[3], length) ||
 	    length > AliroUd::Mailbox::kMaxSizeBytes) {
 		shell_print(sh, "ERR INVALID_ARGUMENT command=mailbox read");
 		return 0;
 	}
 
 	std::array<uint8_t, AliroUd::Mailbox::kMaxSizeBytes> data{};
-	const auto error = AliroUd::Mailbox::Store::RawRead(static_cast<::Aliro::UserDevice::CredentialHandle>(handle),
-							    static_cast<size_t>(offset), data.data(),
+	const auto error = AliroUd::Mailbox::Store::RawRead(handle, static_cast<size_t>(offset), data.data(),
 							    static_cast<size_t>(length));
 	if (error != ALIRO_NO_ERROR) {
 		PrintError(sh, "mailbox read", error);
@@ -792,14 +856,13 @@ int CmdMailboxInit(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 
-	unsigned long handle{};
-	if (!ParseUint(argv[1], handle)) {
+	::Aliro::UserDevice::CredentialHandle handle{};
+	if (!ParseHandle(argv[1], handle)) {
 		shell_print(sh, "ERR INVALID_ARGUMENT command=mailbox init");
 		return 0;
 	}
 
-	const auto error =
-		AliroUd::Mailbox::Store::Initialize(static_cast<::Aliro::UserDevice::CredentialHandle>(handle));
+	const auto error = AliroUd::Mailbox::Store::Initialize(handle);
 	if (error != ALIRO_NO_ERROR) {
 		PrintError(sh, "mailbox init", error);
 		return 0;
@@ -840,20 +903,92 @@ int CmdMailboxReset(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
 
-	unsigned long handle{};
-	if (!ParseUint(argv[1], handle)) {
+	::Aliro::UserDevice::CredentialHandle handle{};
+	if (!ParseHandle(argv[1], handle)) {
 		shell_print(sh, "ERR INVALID_ARGUMENT command=mailbox reset");
 		return 0;
 	}
 
-	const auto error =
-		AliroUd::Mailbox::Store::Reset(static_cast<::Aliro::UserDevice::CredentialHandle>(handle));
+	const auto error = AliroUd::Mailbox::Store::Reset(handle);
 	if (error != ALIRO_NO_ERROR) {
 		PrintError(sh, "mailbox reset", error);
 		return 0;
 	}
 
 	shell_print(sh, "OK");
+	return 0;
+}
+
+/*
+ * "aliro-ud document": inspection of committed Access/Revocation Documents.
+ * Documents are presented to Readers in the step-up phase (Aliro 1.0
+ * Specification, section 7.1, page 32) and are not secret. The CLI shell
+ * thread is the only caller, which serializes use of sDocumentRecord.
+ */
+AliroUd::Credential::PersistedCredential sDocumentRecord{};
+
+int CmdDocumentInspect(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+
+	::Aliro::UserDevice::CredentialHandle handle{};
+	if (!ParseHandle(argv[1], handle)) {
+		shell_print(sh, "ERR INVALID_ARGUMENT command=document inspect");
+		return 0;
+	}
+
+	const auto error = AliroUd::Credential::Store::GetFullRecord(handle, sDocumentRecord);
+	if (error != ALIRO_NO_ERROR) {
+		PrintError(sh, "document inspect", error);
+		return 0;
+	}
+
+	shell_print(sh, "OK handle=%u access=%u access_length=%u revocation=%u revocation_length=%u",
+		    static_cast<unsigned>(handle), sDocumentRecord.mAccessDocument.mPresent ? 1U : 0U,
+		    static_cast<unsigned>(sDocumentRecord.mAccessDocument.mLength),
+		    sDocumentRecord.mRevocationDocument.mPresent ? 1U : 0U,
+		    static_cast<unsigned>(sDocumentRecord.mRevocationDocument.mLength));
+	return 0;
+}
+
+int CmdDocumentRead(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+
+	::Aliro::UserDevice::CredentialHandle handle{};
+	::Aliro::AccessDocumentTypes::DocumentType type{};
+	unsigned long offset{};
+	unsigned long length{};
+	if (!ParseHandle(argv[1], handle) || !ParseDocumentType(argv[2], type) || !ParseUint(argv[3], offset) ||
+	    !ParseUint(argv[4], length)) {
+		shell_print(sh, "ERR INVALID_ARGUMENT command=document read");
+		return 0;
+	}
+
+	const auto error = AliroUd::Credential::Store::GetFullRecord(handle, sDocumentRecord);
+	if (error != ALIRO_NO_ERROR) {
+		PrintError(sh, "document read", error);
+		return 0;
+	}
+
+	const auto &document = (type == ::Aliro::AccessDocumentTypes::DocumentType::Access)
+				       ? sDocumentRecord.mAccessDocument
+				       : sDocumentRecord.mRevocationDocument;
+	if (!document.mPresent) {
+		shell_print(sh, "ERR NOT_PRESENT command=document read");
+		return 0;
+	}
+
+	if (offset > document.mLength || length > document.mLength - offset) {
+		shell_print(sh, "ERR INVALID_ARGUMENT command=document read");
+		return 0;
+	}
+
+	shell_fprintf(sh, SHELL_NORMAL, "OK data=");
+	for (size_t i = 0; i < length; ++i) {
+		shell_fprintf(sh, SHELL_NORMAL, "%02x", document.mData[offset + i]);
+	}
+	shell_fprintf(sh, SHELL_NORMAL, "\n");
 	return 0;
 }
 
@@ -887,10 +1022,11 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		      CmdCredentialSetCredentialTimestamp, 2, 0),
 	SHELL_CMD_ARG(set-revocation-timestamp, NULL, "<hex> Stage revocation_signed_timestamp.",
 		      CmdCredentialSetRevocationTimestamp, 2, 0),
-	SHELL_CMD_ARG(set-access-document, NULL, "<hex> Stage the optional Access Document.",
-		      CmdCredentialSetAccessDocument, 2, 0),
-	SHELL_CMD_ARG(set-revocation-document, NULL, "<hex> Stage the optional Revocation Document.",
-		      CmdCredentialSetRevocationDocument, 2, 0),
+	SHELL_CMD_ARG(set-document, NULL,
+		      "<access|revocation> <length> <hex> Stage an Access or Revocation Document of <length> bytes.",
+		      CmdCredentialSetDocument, 4, 0),
+	SHELL_CMD_ARG(clear-document, NULL, "<access|revocation> Stage removal of an Access or Revocation Document.",
+		      CmdCredentialClearDocument, 2, 0),
 	SHELL_CMD_ARG(commit, NULL, "Validate and persist the staged candidate.", CmdCredentialCommit, 1, 0),
 	SHELL_CMD_ARG(abort, NULL, "Discard the staged candidate.", CmdCredentialAbort, 1, 0),
 	SHELL_CMD_ARG(inspect, NULL, "<handle> Report non-secret metadata for a credential.", CmdCredentialInspect,
@@ -937,6 +1073,14 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 	SHELL_SUBCMD_SET_END);
 
 SHELL_STATIC_SUBCMD_SET_CREATE(
+	sub_document,
+	SHELL_CMD_ARG(inspect, NULL, "<handle> Report which documents a credential has, and their lengths.",
+		      CmdDocumentInspect, 2, 0),
+	SHELL_CMD_ARG(read, NULL, "<handle> <access|revocation> <offset> <length> Read committed document bytes (hex).",
+		      CmdDocumentRead, 5, 0),
+	SHELL_SUBCMD_SET_END);
+
+SHELL_STATIC_SUBCMD_SET_CREATE(
 	sub_timing,
 	SHELL_CMD_ARG(stats, NULL,
 		      "Report command-to-response timing evidence (sample count, last/max duration).",
@@ -950,6 +1094,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 	SHELL_CMD(credential, &sub_credential, "Access Credential provisioning/staging commands (AWP3).", NULL),
 	SHELL_CMD(auth, &sub_auth, "Button authorization window status/test-trigger commands (AWP4).", NULL),
 	SHELL_CMD(mailbox, &sub_mailbox, "Mailbox inspection/read/initialization/reset commands (AWP6).", NULL),
+	SHELL_CMD(document, &sub_document, "Access/Revocation Document inspection commands.", NULL),
 	SHELL_CMD(timing, &sub_timing, "Command-to-response timing evidence commands (AWP7).", NULL),
 	SHELL_SUBCMD_SET_END);
 

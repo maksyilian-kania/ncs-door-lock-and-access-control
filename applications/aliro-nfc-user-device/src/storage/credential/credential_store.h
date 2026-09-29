@@ -77,7 +77,11 @@ AliroError GetSignedTimestamps(::Aliro::UserDevice::CredentialHandle handle,
 /** @brief Gets the full non-secret persisted record for a credential (for CLI inspection). */
 AliroError GetFullRecord(::Aliro::UserDevice::CredentialHandle handle, PersistedCredential &out);
 
-/** @brief Clears a credential's provisioned document of one type, if any, and persists the change. */
+/**
+ * @brief Clears a credential's provisioned document of one type, if any, and persists the change.
+ *
+ * A persistence failure leaves the committed document unchanged.
+ */
 AliroError DeleteDocument(::Aliro::UserDevice::CredentialHandle handle, ::Aliro::AccessDocumentTypes::DocumentType type);
 
 /** @brief Gets the number of reader_group_identifier bindings for a credential. */

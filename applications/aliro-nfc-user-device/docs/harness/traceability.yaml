@@ -75,28 +75,33 @@ requirements:
 - requirement: ALIRO-UD-SYRS-P1-004
   summary: CLI provisions key, bindings, trust, policy, timestamps, mailbox configuration, and optional documents.
   application_slices: [C1.2, C3.2, C7.2]
-  application_status: planned
+  application_status: verified-host
   verification:
     host:
       - cli_info.test_credential_staging_transaction_commits
       - cli_info.test_mailbox_data_subset_staging_and_inspect
+      - provisioning.test_documents_through_create_and_update
     target: []
   target_assignment: C7.2 provisioning a clean DK through the CLI.
   stack_gate: none
   evidence:
     - evidence/C1.2.md
+    - evidence/C3.2.md
     - tests/functional/subsys/aliro_nfc_user_device/cli_info/src/test_cli_info.cpp
-  notes: Open host clause is Access/Revocation Document provisioning (C3.2).
+    - tests/functional/subsys/aliro_nfc_user_device/provisioning/src/test_provisioning.cpp
 
 - requirement: ALIRO-UD-SYRS-P1-005
   summary: CLI create, update, inspect, delete, and factory reset with deterministic results.
   application_slices: [C1.3, C2.2, C3.2, C7.2]
-  application_status: planned
+  application_status: verified-host
   verification:
     host:
       - cli_info.test_credential_staging_transaction_commits
       - cli_info.test_mailbox_inspect_init_read_and_erase_on_delete
       - persistent_key (C2.2 credential delete/reset Kpersistent cascade and failure propagation)
+      - provisioning.test_delete_erases_mailbox_and_failures_preserve_state
+      - provisioning.test_reset_erases_mailboxes_and_failures_preserve_state
+      - document.test_failed_credential_delete_keeps_documents
     target: []
   target_assignment: C7.2 delete and factory reset on the DK.
   stack_gate: none
@@ -104,21 +109,26 @@ requirements:
     - evidence/C0.1.md
     - evidence/C1.4.md
     - evidence/C2.2.md
-  notes: Open application gap (C0.1 item 1). Mailbox erase on credential delete/reset is owned by C3.2. C2.2 closed the discarded Kpersistent cleanup result; see evidence/C1.4.md and evidence/C2.2.md.
+    - evidence/C3.2.md
+  notes: C0.1 item 1 is closed. C3.2 erases the mailbox in the credential Delete/Reset adapter and propagates its failure; C2.2 closed the Kpersistent cleanup result.
 
 - requirement: ALIRO-UD-SYRS-P1-006
   summary: Reject malformed or inconsistent provisioning input without changing committed state.
   application_slices: [C3.2, C7.2]
-  application_status: planned
+  application_status: verified-host
   verification:
     host:
       - cli_info.test_credential_setters_require_open_transaction
+      - provisioning (malformed CLI/payload input, setters outside a transaction, commit/abort/fault atomicity)
+      - document.test_provisioning_rejects_inconsistent_documents
+      - document.test_failed_document_clear_keeps_committed_document
     target: []
   target_assignment: C7.2 CLI rejection on the DK.
   stack_gate: none
   evidence:
+    - evidence/C3.2.md
     - tests/functional/subsys/aliro_nfc_user_device/cli_info/src/test_cli_info.cpp
-  notes: Host rejection and failure-atomicity coverage is owned by C3.2.
+    - tests/functional/subsys/aliro_nfc_user_device/provisioning/src/test_provisioning.cpp
 
 - requirement: ALIRO-UD-SYRS-P1-007
   summary: Retain credentials, trust, policies, documents, mailbox, and Kpersistent across reset and power loss.
@@ -142,7 +152,7 @@ requirements:
     - evidence/C2.2.md
     - evidence/C2.3.md
     - evidence/C3.1.md
-  notes: C2.1 covers Kpersistent record semantics, C2.2 its crash-safe recovery, and C2.3 its fault matrix on host. C3.1 covers document persistence across simulated reboot; document delete failure atomicity is C3.2.
+  notes: C2.1 covers Kpersistent record semantics, C2.2 its crash-safe recovery, and C2.3 its fault matrix on host. C3.1 covers document persistence across simulated reboot; C3.2 (evidence/C3.2.md) covers document and credential delete failure atomicity across it.
 
 - requirement: ALIRO-UD-SYRS-P1-008
   summary: No export of the credential private key, Kpersistent, or session keys via CLI, NFC, logs, or diagnostics.
@@ -740,12 +750,16 @@ requirements:
   verification:
     host:
       - document (C3.1 exact-byte storage, retrieval, replacement, deletion, reset, immutable snapshots, bounds, capacity)
+      - document (C3.2 provisioning validation and clear/delete failure atomicity)
+      - provisioning (C3.2 CLI create/update/clear/delete/reset of documents)
     target: []
   stack_gate: none
   evidence:
     - tests/functional/subsys/aliro_nfc_user_device/document/src/test_document_snapshots.cpp
+    - tests/functional/subsys/aliro_nfc_user_device/provisioning/src/test_provisioning.cpp
     - evidence/C3.1.md
-  notes: C3.1 covers application storage and snapshots only. Provisioning validation is C3.2; Step-Up retrieval is C5/C6.
+    - evidence/C3.2.md
+  notes: C3.1 and C3.2 cover application storage, snapshots, and provisioning. Step-Up retrieval is C5/C6.
 
 - requirement: ALIRO-UD-SYRS-P2-022
   summary: Store and retrieve a Revocation Document.
@@ -754,12 +768,16 @@ requirements:
   verification:
     host:
       - document (C3.1 exact-byte storage, retrieval, replacement, deletion, reset, immutable snapshots, bounds, capacity)
+      - document (C3.2 provisioning validation and clear/delete failure atomicity)
+      - provisioning (C3.2 CLI create/update/clear/delete/reset of documents)
     target: []
   stack_gate: none
   evidence:
     - tests/functional/subsys/aliro_nfc_user_device/document/src/test_document_snapshots.cpp
+    - tests/functional/subsys/aliro_nfc_user_device/provisioning/src/test_provisioning.cpp
     - evidence/C3.1.md
-  notes: C3.1 covers application storage and snapshots only. Provisioning validation is C3.2. The harness README stack gate is assessed by C6.1.
+    - evidence/C3.2.md
+  notes: C3.1 and C3.2 cover application storage, snapshots, and provisioning. The harness README stack gate is assessed by C6.1.
 
 - requirement: ALIRO-UD-SYRS-P2-023
   summary: Signal retrievable Access and Revocation Documents in the AUTH1 signaling_bitmap.

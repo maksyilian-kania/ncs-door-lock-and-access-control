@@ -128,6 +128,20 @@ AliroError ApplyDirtyBytes(::Aliro::UserDevice::CredentialHandle credentialHandl
 /** @brief Erases one credential's mailbox byte storage entirely (APP_PLAN.md AWP6: called on credential delete). Idempotent. */
 AliroError EraseForCredential(::Aliro::UserDevice::CredentialHandle credentialHandle);
 
+/**
+ * @brief As `EraseForCredential()`, also returning the erased committed
+ * record (default-constructed if there was none) for `Restore()`.
+ *
+ * On failure nothing is erased.
+ */
+AliroError EraseForCredential(::Aliro::UserDevice::CredentialHandle credentialHandle, MailboxRecord &outErased);
+
+/**
+ * @brief Re-commits a record returned by `EraseForCredential()`, used when
+ * the owning credential's deletion fails. A no-op for an uninitialized record.
+ */
+AliroError Restore(::Aliro::UserDevice::CredentialHandle credentialHandle, const MailboxRecord &record);
+
 /** @brief Erases every credential's mailbox byte storage (APP_PLAN.md AWP6: called on credential factory reset). */
 AliroError EraseAll();
 

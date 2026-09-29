@@ -220,6 +220,9 @@ struct StagingCandidate {
 	::Aliro::Timestamp mRevocationSignedTimestamp{};
 	OptionalDocument mAccessDocument{};
 	OptionalDocument mRevocationDocument{};
+	/** @brief Whether this transaction already set or cleared the document; a second setter is rejected. */
+	bool mAccessDocumentStaged{ false };
+	bool mRevocationDocumentStaged{ false };
 
 	/** @brief Erases the scalar (and everything else); called after commit/abort. */
 	void Clear() { *this = StagingCandidate{}; }

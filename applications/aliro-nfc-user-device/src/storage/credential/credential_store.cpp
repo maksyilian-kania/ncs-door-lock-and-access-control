@@ -16,6 +16,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
+#include <algorithm>
+
 LOG_MODULE_REGISTER(aliro_ud_credential, CONFIG_ALIRO_UD_CREDENTIAL_LOG_LEVEL);
 
 using namespace Aliro;
@@ -99,6 +101,34 @@ bool ReaderGroupIdentifierEquals(const ReaderGroupIdentifier &a, const ReaderGro
 }
 
 /*
+ * A present document is a non-empty CBOR structure (Aliro 1.0
+ * Specification, section 7.2, page 32): IssuerAuth plus IssuerSignedItems.
+ * Its bytes are stored verbatim and never parsed here. Bytes past its
+ * length, and every field of an absent document, must be zero so that each
+ * committed record has exactly one encoding.
+ */
+AliroError ValidateDocument(const OptionalDocument &document)
+{
+	if (document.mPresent && (document.mLength == 0 || document.mLength > kDocumentMaxSizeBytes)) {
+		LOG_WRN("Document length %u outside 1..%zu", document.mLength, kDocumentMaxSizeBytes);
+		return ALIRO_INVALID_ARGUMENT;
+	}
+
+	if (!document.mPresent && document.mLength != 0) {
+		LOG_WRN("Absent document declares length %u", document.mLength);
+		return ALIRO_INVALID_ARGUMENT;
+	}
+
+	const auto unused = document.mData.begin() + document.mLength;
+	if (!std::all_of(unused, document.mData.end(), [](uint8_t byte) { return byte == 0; })) {
+		LOG_WRN("Document carries bytes past its declared length");
+		return ALIRO_INVALID_ARGUMENT;
+	}
+
+	return ALIRO_NO_ERROR;
+}
+
+/*
  * Validates payload structure/bounds and (if a new key is staged) the raw
  * scalar's cryptographic validity, via a transient PSA import immediately
  * destroyed again - no persistent state changes result either way.
@@ -161,13 +191,11 @@ AliroError ValidatePayloadShape(const Provisioning::Payload &input)
 		}
 	}
 
-	if (input.mAccessDocument.mPresent && input.mAccessDocument.mLength > kDocumentMaxSizeBytes) {
-		return ALIRO_INVALID_ARGUMENT;
-	}
+	auto documentError = ValidateDocument(input.mAccessDocument);
+	VerifyOrReturnStatus(documentError == ALIRO_NO_ERROR, documentError);
 
-	if (input.mRevocationDocument.mPresent && input.mRevocationDocument.mLength > kDocumentMaxSizeBytes) {
-		return ALIRO_INVALID_ARGUMENT;
-	}
+	documentError = ValidateDocument(input.mRevocationDocument);
+	VerifyOrReturnStatus(documentError == ALIRO_NO_ERROR, documentError);
 
 	switch (input.mPolicy) {
 	case AuthenticationPolicy::UserDeviceSetting:
@@ -257,14 +285,25 @@ AliroError DeleteSlotInternal(size_t slotIndex)
 	VerifyOrReturnStatus(error == ALIRO_NO_ERROR, error, LOG_ERR("Failed to journal delete"));
 
 	error = Persistence::EraseSlot(slotIndex);
-	VerifyOrReturnStatus(error == ALIRO_NO_ERROR, error, LOG_ERR("Failed to erase credential slot"));
+	if (error != ALIRO_NO_ERROR) {
+		LOG_ERR("Failed to erase credential slot");
+		/* The credential stays committed, so boot recovery must not finish this delete. */
+		Persistence::EraseJournal();
+		return error;
+	}
 
 	sSlots[slotIndex] = PersistedCredential{};
 
 	KeyBackend::DestroyKey(oldKeyId);
 	PurgePreferredEntriesForHandle(handle);
 
-	return Persistence::EraseJournal();
+	/*
+	 * The delete is committed once the slot is erased. A journal left
+	 * behind only repeats idempotent cleanup at boot and is overwritten by
+	 * the next transaction's journal.
+	 */
+	Persistence::EraseJournal();
+	return ALIRO_NO_ERROR;
 }
 
 /*
@@ -586,14 +625,20 @@ AliroError DeleteDocument(CredentialHandle handle, ::Aliro::AccessDocumentTypes:
 		return ALIRO_INVALID_ARGUMENT;
 	}
 
-	auto &record = sSlots[slotIndex];
-	if (type == ::Aliro::AccessDocumentTypes::DocumentType::Access) {
-		record.mAccessDocument = OptionalDocument{};
-	} else {
-		record.mRevocationDocument = OptionalDocument{};
+	PersistedCredential updated = sSlots[slotIndex];
+	auto &document = (type == ::Aliro::AccessDocumentTypes::DocumentType::Access) ? updated.mAccessDocument
+										     : updated.mRevocationDocument;
+	if (!document.mPresent) {
+		return ALIRO_NO_ERROR;
 	}
+	document = OptionalDocument{};
 
-	return Persistence::SaveSlot(slotIndex, record);
+	/* The committed record changes only after the persisted one has. */
+	const auto error = Persistence::SaveSlot(slotIndex, updated);
+	VerifyOrReturnStatus(error == ALIRO_NO_ERROR, error, LOG_ERR("Failed to persist document deletion"));
+
+	sSlots[slotIndex] = updated;
+	return ALIRO_NO_ERROR;
 }
 
 AliroError GetGroupBindingCount(CredentialHandle handle, size_t &outCount)
